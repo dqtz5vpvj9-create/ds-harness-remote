@@ -131,6 +131,8 @@ jobs:
           node-version: 24.9.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install the pinned native source SDK in an isolated closure
+        run: node scripts/prepare-native-sdk.mjs "$RUNNER_TEMP/remote-native-sdk"
       - run: pnpm --filter './packages/**' -r build
       - name: Mount local XFS
         run: |
@@ -171,6 +173,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install the pinned native source SDK in an isolated closure
+        run: node scripts/prepare-native-sdk.mjs "$RUNNER_TEMP/remote-native-sdk"
 
       - name: Build workspace packages
         run: pnpm --filter './packages/**' -r build
@@ -296,6 +301,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install the pinned native source SDK in an isolated closure
+        run: node scripts/prepare-native-sdk.mjs "$RUNNER_TEMP/remote-native-sdk"
 
       - name: Build workspace packages
         run: pnpm --filter './packages/**' -r build

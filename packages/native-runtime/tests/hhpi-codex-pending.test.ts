@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, appendFile, rm, lstat, realpath, rename } fr
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { setImmediate } from 'node:timers/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createServer } from 'node:http';
 import { chmod } from 'node:fs/promises';
 import { WebSocketServer } from 'ws';
@@ -82,7 +82,8 @@ async function fixture(t: TestContext) {
             await adapter.read({ sessionId }); deliver(value);
             if (value.method === 'item/tool/requestUserInput' && daemon) {
                 const received = () => (JSON.parse(String(durable() ?? '[]')) as Array<{ request?: NativeRequest }>).some(row => row.request?.id === value.id);
-                for (let i = 0; i < 100 && !received(); i++) await setImmediate();
+                const deadline = AbortSignal.timeout(5_000);
+                while (!received() && !deadline.aborted) await delay(10);
                 assert.ok(received(), 'a received question must be durable before restarting its viewer');
             }
         },

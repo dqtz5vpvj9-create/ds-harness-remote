@@ -56,7 +56,7 @@ test('native plans retain an explicit plan marker and ordinary file paths do not
 test('preparing an MCP image preserves adjacent structured results, text order and the original native failure', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'hhpi-rich-mixed-'));
   const index = new SourceEventIndex(':memory:', session), lifetime = new AbortController(), ready = Promise.withResolvers<void>();
-  const attachments = new CodexAttachments(index, join(directory, 'images'), async () => { throw new Error('Embedded media must not read a source path'); }, lifetime.signal, ({ turnId, itemId }) => {
+  const attachments = new CodexAttachments(index, join(directory, 'attachments', 'v1'), async () => { throw new Error('Embedded media must not read a source path'); }, lifetime.signal, ({ turnId, itemId }) => {
     const state = history.itemState(turnId, itemId)!; history.acceptItem(session, turnId, state.item, state.completed); ready.resolve();
   });
   const history = new CodexHistory(index, { toolContent: (turnId, item) => attachments.content(turnId, item) });
