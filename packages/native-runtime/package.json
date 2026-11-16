@@ -1,0 +1,62 @@
+{
+  "name": "@dsh-remote/native-runtime",
+  "version": "0.1.0-hhpi.1",
+  "description": "Source-owned native agent history, operations and DSH projection shared by Remote and HHPI.",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=24.9"
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "NOTICE.md",
+    "scripts",
+    "tests",
+    "tsconfig.json",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    },
+    "./remote/*.mjs": {
+      "types": "./dist/remote/*.d.mts",
+      "import": "./dist/remote/*.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-helpers.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-api-terminal-controller": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-workspace-files": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-atomic-write": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-attachment": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-attachment-local": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-file-upload": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-host-directory-picker": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-user-questions": "0.2.2-rc.1",
+    "sharp": "0.35.5",
+    "ws": "8.21.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "24.10.1",
+    "@types/ws": "8.18.1",
+    "tsx": "4.20.6"
+  }
+}
