@@ -16,6 +16,36 @@ const cleanupContract1 = async () => {
 afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
+  it('enrolls a separate Client without exposing or replacing Host credentials and never retries registration', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-owned-client-'))
+    directories.push(directory)
+    const store = new ServerCredentialStore(directory), identity = hostIdentity()
+    const original = await store.save({ serverUrl: 'https://remote.example', deviceId: identity.deviceId,
+      authorizationMethod: 'account', account: 'owner@example.com', ...tokens() })
+    const descriptor = { deviceId: '0198a2d0-0000-7000-8000-000000000002', name: 'Go', role: 'client',
+      platform: 'android', identityKey: generateKeyPair(new Uint8Array(32).fill(8)).publicKey, clientVersion: '1.0.0' }
+    const issued = tokens({ accessToken: 'new-client-access-token', refreshToken: 'new-client-refresh-token' })
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(json(issued))
+      .mockRejectedValueOnce(new Error('Response lost after registration'))
+    const api = new HostServerApi('https://remote.example', store, fetchMock)
+    api.bindIdentity(identity)
+    try {
+      await expect(api.registerOwnedClient(descriptor)).resolves.toEqual(issued)
+      expect(fetchMock.mock.calls[0]?.[0]).toBe('https://remote.example/api/v1/devices/register-owned-role')
+      expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer access-token-value' })
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ v: 1, device: descriptor })
+      expect(await store.load(api.baseUrl, identity.deviceId)).toEqual(original)
+      await expect(api.registerOwnedClient(descriptor)).rejects.toMatchObject({ code: 'CONNECTION_FAILED' })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(await store.load(api.baseUrl, identity.deviceId)).toEqual(original)
+      await expect(api.registerOwnedClient({ ...descriptor, role: 'host' })).rejects.toThrow()
+      await expect(api.registerOwnedClient({ ...descriptor, deviceId: identity.deviceId })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      await store.restrictPairingHostOnly()
+      await expect(api.registerOwnedClient(descriptor)).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally { api.close() }
+  })
+
   it('cancels runtime-owned HTTP work through response consumption and rejects requests after close', async () => {
     await runScenarios([
       { name: 'close before response headers', body: false, timeout: false },

@@ -86461,6 +86461,23 @@ var HostServerApi = class {
       ...account === void 0 ? {} : { account }
     };
   }
+  /** Local owner applications may enroll their client without receiving this
+   * Host's bearer or asking for the account password again. The client creates
+   * and retains its own private key; only its public descriptor reaches us.
+   * This is deliberately not an encrypted peer RPC: the embedding application
+   * must authenticate its existing owner before calling it. */
+  async registerOwnedClient(input4) {
+    const device = clientDeviceDescriptorSchema.parse(input4);
+    await this.loadStoredPolicy();
+    if (this.role !== "host" || this.hostOnly || device.deviceId === this.requireIdentity().deviceId) {
+      throw new ServerApiError("METHOD_NOT_ALLOWED", "This device cannot enroll an account Client.", false);
+    }
+    const tokens = await this.request("/api/v1/devices/register-owned-role", {
+      method: "POST",
+      body: JSON.stringify({ v: 1, device })
+    });
+    return validateTokens(tokens);
+  }
   async authenticate(identity3 = this.requireIdentity()) {
     this.bindIdentity(identity3);
     if (this.credentials !== void 0 && this.credentials.accessTokenExpiresAt > Date.now() + 3e4) {
@@ -104840,6 +104857,24 @@ var HostPluginRuntime = class {
     this.serverConnection?.resume();
     this.logger.info("Host authorized as an owned device");
     return result;
+  }
+  /** Authenticated local owner integration, never a remote peer endpoint. */
+  async registerOwnedClient(descriptor) {
+    const api = this.serverApi;
+    if (this.closed || api === void 0) {
+      throw new ServerApiError("SERVER_NOT_CONFIGURED", "An active account Host is required to enroll a Client.", false);
+    }
+    const device = clientDeviceDescriptorSchema.parse(descriptor);
+    const { account } = await api.authenticate();
+    if (!account) throw new ServerApiError("ACCOUNT_AUTH_REQUIRED", "An account-owned Host is required to enroll a Client.", false);
+    const tokens = await api.registerOwnedClient(device);
+    return {
+      serverUrl: api.baseUrl,
+      deviceId: device.deviceId,
+      identityKey: device.identityKey,
+      tokens,
+      account
+    };
   }
   async authorizeHostWithAccount(email3, password) {
     if (this.serverApi === void 0) {

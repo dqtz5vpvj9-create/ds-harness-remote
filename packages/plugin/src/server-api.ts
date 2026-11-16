@@ -1,7 +1,7 @@
 import type { PairingCredentials } from './pairing-contract.js'
 import { platform } from 'node:os'
 import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
-import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
+import { clientDeviceDescriptorSchema, deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import type { RtcIceServer } from '@dsh-remote/webrtc'
 import type { HostIdentity } from './identity-store.js'
 import { ServerCredentialsBusyError, ServerCredentialsLockUnsupportedError, type ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
@@ -340,6 +340,24 @@ export class HostServerApi {
       method: 'owned_device',
       ...(account === undefined ? {} : { account }),
     }
+  }
+
+  /** Local owner applications may enroll their client without receiving this
+   * Host's bearer or asking for the account password again. The client creates
+   * and retains its own private key; only its public descriptor reaches us.
+   * This is deliberately not an encrypted peer RPC: the embedding application
+   * must authenticate its existing owner before calling it. */
+  async registerOwnedClient(input: unknown): Promise<TokenPair> {
+    const device = clientDeviceDescriptorSchema.parse(input)
+    await this.loadStoredPolicy()
+    if (this.role !== 'host' || this.hostOnly || device.deviceId === this.requireIdentity().deviceId) {
+      throw new ServerApiError('METHOD_NOT_ALLOWED', 'This device cannot enroll an account Client.', false)
+    }
+    const tokens = await this.request<TokenPair>('/api/v1/devices/register-owned-role', {
+      method: 'POST', body: JSON.stringify({ v: 1, device }),
+    })
+    // Do not adopt/save these tokens: they belong exclusively to the Client.
+    return validateTokens(tokens)
   }
 
   async authenticate(identity = this.requireIdentity()): Promise<ServerCredentials> {

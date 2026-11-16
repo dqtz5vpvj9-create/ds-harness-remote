@@ -5,7 +5,7 @@ import { WorkspaceUploadHost } from './workspace-upload.js'
 import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
-import { createEvent, REMOTE_SESSION_EVENTS_CAPABILITY, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
+import { clientDeviceDescriptorSchema, createEvent, REMOTE_SESSION_EVENTS_CAPABILITY, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
@@ -428,6 +428,25 @@ export class HostPluginRuntime {
     this.serverConnection?.resume()
     this.logger.info('Host authorized as an owned device')
     return result
+  }
+
+  /** Authenticated local owner integration, never a remote peer endpoint. */
+  async registerOwnedClient(descriptor: unknown) {
+    const api = this.serverApi
+    if (this.closed || api === undefined) {
+      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'An active account Host is required to enroll a Client.', false)
+    }
+    const device = clientDeviceDescriptorSchema.parse(descriptor)
+    const { account } = await api.authenticate()
+    if (!account) throw new ServerApiError('ACCOUNT_AUTH_REQUIRED', 'An account-owned Host is required to enroll a Client.', false)
+    const tokens = await api.registerOwnedClient(device)
+    return {
+      serverUrl: api.baseUrl,
+      deviceId: device.deviceId,
+      identityKey: device.identityKey,
+      tokens,
+      account,
+    }
   }
 
   async authorizeHostWithAccount(email: string, password: string): Promise<DeviceAuthorization> {
