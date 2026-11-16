@@ -158,4 +158,3 @@ test('revoking grants ends an idle source attachment and prevents later input wi
         app.allow(['list']); assert.equal((await app.invoke('list', { sessionId: session.id }) as WebTerminalInfo[]).length, 1);
     } finally { await input.source.return?.(); await app.close(); }
 });
-
