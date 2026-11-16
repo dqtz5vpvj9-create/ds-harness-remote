@@ -53,3 +53,24 @@ The core Codex entry point does not require this extension. The port in
 `workspace/terminal-owner` checks the SDK export and contains no PTY execution
 implementation. Host integration tests must run against the pinned SDK, as well
 as checking that a plain SDK is rejected before installation.
+
+For a fresh Remote checkout, prepare the pinned SDK after the workspace install:
+
+```sh
+node scripts/prepare-native-sdk.mjs /path/to/isolated-sdk
+pnpm --filter ./packages/native-runtime build
+pnpm --filter ./packages/native-runtime test
+```
+
+Run these commands from the repository root. The helper verifies the published
+archive and package checksums, installs the exact SDK lockfile into the supplied
+directory, and changes only this package's SDK links. It never modifies the
+workspace pnpm store or the Plugin's default SDK. Source and license materials
+remain with the isolated SDK. CI uses the same procedure. An optional second
+argument supplies an offline archive with the same required checksum.
+
+The cross-package network contract is `tests/native-multihost-network.test.ts`:
+it runs the actual self-hosted Server, Host/Client runtimes and encrypted relay,
+with a synthetic execution boundary and the production durable receipt ledger.
+It covers loss of A's accepted response while B stays usable and A reconnects;
+it does not constitute provider, browser or device acceptance.

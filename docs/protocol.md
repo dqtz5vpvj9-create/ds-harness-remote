@@ -423,6 +423,11 @@ Hosts. A new request replaces only its previous link to the same Host; closing
 or reconnecting one Host does not close links to other Hosts. Each link keeps
 its own connection ID, Noise session, replay counters and authorization. Clients
 without this negotiated capability retain the single-Host replacement behavior.
+Hosts may also negotiate this capability. Closing an owned channel then sends
+`connection.lease.close` even when the Server does not support resumable leases.
+The Server reports a Host-initiated close as a connection-scoped, retryable
+`CONNECTION_FAILED`; a Client-initiated release remains non-retryable
+`CONNECTION_CLOSED`. Reconnection does not replay any application request.
 
 Host 的 `harnessVersion` 优先来自本机 Harness `host.describe.version`；旧 Harness 返回已知
 占位值或不提供该方法时，从当前 `@deepseek-ai/dsh` 运行包读取版本。Host 注册 descriptor

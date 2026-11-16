@@ -101549,6 +101549,7 @@ var HostServerConnection = class {
     const credentials = await this.api.authenticate(this.identity);
     if (this.stopped) return;
     const offeredCapabilities = this.rtcFactoryProvider === void 0 || this.config.forceRelay ? [RELAY_RESUME_CAPABILITY, "transport.relay", "transport.relay.attach", ...this.hostCapabilities()] : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", ...this.hostCapabilities()];
+    if (this.config.multiHost) offeredCapabilities.push("remote.multi-host.v1");
     const recoveryTickets = [...this.tunnels.values()].flatMap((tunnel) => tunnel.lease?.recoveryTicket() ?? []).slice(0, 64);
     const socket = this.createWebSocket(websocketUrl2(this.api.baseUrl));
     this.socket = socket;
@@ -102496,7 +102497,7 @@ var HostServerConnection = class {
     socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
   }
   notifyTunnelClosed(tunnel) {
-    if (!tunnel.lease || this.socket?.readyState !== 1) return;
+    if (!tunnel.lease && !this.negotiatedCapabilities.includes("remote.multi-host.v1") || this.socket?.readyState !== 1) return;
     try {
       this.sendControl("connection.lease.close", { connectionId: tunnel.connectionId });
     } catch {

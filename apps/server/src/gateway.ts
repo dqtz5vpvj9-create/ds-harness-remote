@@ -565,8 +565,11 @@ export class Gateway {
     const id = p.connectionId
     const link = typeof id === 'string' ? this.links.get(id) : undefined
     if (!link || (peer.id !== link.host && peer.id !== link.client)) throw new ApiError('CONNECTION_NOT_FOUND')
-    if (frame.type === 'connection.lease.close' && peer.role === 'client' && peer.capabilities.includes('remote.multi-host.v1')) {
-      this.drop(link, 'CONNECTION_CLOSED', false)
+    if (frame.type === 'connection.lease.close' && peer.capabilities.includes('remote.multi-host.v1')) {
+      // Releasing one Host channel is a recoverable transport loss for its
+      // Client. An explicit Client release stays closed. Neither closes the
+      // shared control socket or another Host's channel.
+      this.drop(link, peer.role === 'host' ? 'CONNECTION_FAILED' : 'CONNECTION_CLOSED', peer.role === 'host')
       return
     }
     const otherId = peer.id === link.host ? link.client : link.host

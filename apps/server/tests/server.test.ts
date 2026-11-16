@@ -535,6 +535,26 @@ describe('control authorization and encrypted relay', () => {
     expect(await a.host.next('relay')).toMatchObject({ connectionId: a.connectionId })
   })
 
+  it('allows a negotiated Host to release its own link without closing another Host or permitting foreign releases', async () => {
+    const a = await connection({ hostCapabilities: [...fullCapabilities, 'remote.multi-host.v1'], clientCapabilities: [...fullCapabilities, 'remote.multi-host.v1'] })
+    await handshake(a)
+    const h = await device('host'), host = await socket(h, { capabilities: [...fullCapabilities, 'remote.multi-host.v1'] })
+    await host.next('hello.ack')
+    a.client.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: ['relay'] })
+    const incoming = await host.next('connect.incoming')
+    host.send('connect.accepted', { connectionId: incoming.connectionId })
+    await a.client.next('connect.accepted')
+    await handshake({ h, c: a.c, host, client: a.client, incoming, connectionId: incoming.connectionId })
+    host.send('connection.lease.close', { connectionId: a.connectionId })
+    expect(await host.next('error')).toMatchObject({ code: 'CONNECTION_NOT_FOUND', connectionId: a.connectionId })
+    a.client.send('relay', { connectionId: a.connectionId, targetDeviceId: a.h.deviceId, counter: 0, ciphertext: 'AA' })
+    expect(await a.host.next('relay')).toMatchObject({ connectionId: a.connectionId })
+    a.host.send('connection.lease.close', { connectionId: a.connectionId })
+    expect(await a.client.next('error')).toMatchObject({ code: 'CONNECTION_FAILED', connectionId: a.connectionId, retryable: true })
+    a.client.send('relay', { connectionId: incoming.connectionId, targetDeviceId: h.deviceId, counter: 0, ciphertext: 'AA' })
+    expect(await host.next('relay')).toMatchObject({ connectionId: incoming.connectionId })
+  })
+
   it('retains single-host replacement for clients without the negotiated capability', async () => {
     const a = await connection()
     const h = await device('host'), host = await socket(h)

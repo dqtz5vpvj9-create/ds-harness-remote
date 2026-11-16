@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - hhpi-runtime
     tags:
       - "v*"
   pull_request:
@@ -78,6 +79,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install the pinned native source SDK in an isolated closure
+        run: node scripts/prepare-native-sdk.mjs "$RUNNER_TEMP/remote-native-sdk"
+
       - name: Build workspace packages
         run: pnpm --filter './packages/**' -r build
 
@@ -93,6 +97,11 @@ jobs:
 
       - name: Run tests
         run: pnpm -r test
+
+      - name: Verify shared runtime over the self-hosted multi-host carrier
+        run: |
+          pnpm exec tsc -p tests/tsconfig.json
+          pnpm exec vitest run tests/native-multihost-network.test.ts tests/native-sdk.test.ts
 
       # Android prebuild recompiles shared packages. Serialize workspace builds
       # so Plugin bundling cannot read dist files while tsc rewrites them.
