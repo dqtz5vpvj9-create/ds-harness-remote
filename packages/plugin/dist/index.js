@@ -1998,7 +1998,7 @@ var require_event_target = __commonJS({
     };
     Object.defineProperty(ErrorEvent.prototype, "error", { enumerable: true });
     Object.defineProperty(ErrorEvent.prototype, "message", { enumerable: true });
-    var MessageEvent = class extends Event3 {
+    var MessageEvent2 = class extends Event3 {
       /**
        * Create a new `MessageEvent`.
        *
@@ -2018,7 +2018,7 @@ var require_event_target = __commonJS({
         return this[kData];
       }
     };
-    Object.defineProperty(MessageEvent.prototype, "data", { enumerable: true });
+    Object.defineProperty(MessageEvent2.prototype, "data", { enumerable: true });
     var EventTarget2 = {
       /**
        * Register an event listener.
@@ -2041,7 +2041,7 @@ var require_event_target = __commonJS({
         let wrapper;
         if (type === "message") {
           wrapper = function onMessage(data2, isBinary2) {
-            const event = new MessageEvent("message", {
+            const event = new MessageEvent2("message", {
               data: isBinary2 ? data2 : data2.toString()
             });
             event[kTarget] = this;
@@ -2104,7 +2104,7 @@ var require_event_target = __commonJS({
       ErrorEvent,
       Event: Event3,
       EventTarget: EventTarget2,
-      MessageEvent
+      MessageEvent: MessageEvent2
     };
     function callListener(listener, thisArg, event) {
       if (typeof listener === "object" && listener.handleEvent) {
@@ -65169,6 +65169,7 @@ function parseRemoteWorkspaceTypes(value) {
   return types22;
 }
 var connectRequestPayloadSchema = external_exports.object({
+  requestId: external_exports.string().min(1).max(128).optional(),
   hostDeviceId: external_exports.string().min(1),
   preferredTransports: external_exports.array(external_exports.unknown()).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES).pipe(external_exports.array(transportEnum))
 });
@@ -65186,6 +65187,7 @@ var connectIncomingPayloadSchema = external_exports.object({
   relayEpoch: external_exports.number().int().nonnegative().optional()
 });
 var connectAcceptedPayloadSchema = external_exports.object({
+  requestId: external_exports.string().min(1).max(128).optional(),
   relayRecoveryTicket: external_exports.string().min(1).max(4096).optional(),
   recoveryTicket: external_exports.string().min(1).max(4096).optional(),
   connectionId: external_exports.string().min(1),
@@ -65195,6 +65197,7 @@ var connectAcceptedPayloadSchema = external_exports.object({
   relayEpoch: external_exports.number().int().nonnegative().optional()
 });
 var connectRejectedPayloadSchema = external_exports.object({
+  requestId: external_exports.string().min(1).max(128).optional(),
   connectionId: external_exports.string().min(1),
   code: external_exports.string().optional(),
   message: external_exports.string().optional()
@@ -65238,6 +65241,7 @@ var pingPongPayloadSchema = external_exports.object({
   nonce: external_exports.string().min(1)
 });
 var controlErrorPayloadSchema = external_exports.object({
+  requestId: external_exports.string().min(1).max(128).optional(),
   code: external_exports.string().min(1),
   message: external_exports.string().min(1),
   retryable: external_exports.boolean().optional(),
@@ -67629,7 +67633,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.selected = void 0;
     this.connectedAt = void 0;
     this.relayCounter = 0;
-    this.socket = new WebSocket(this.url);
+    this.socket = (this.options.controlSocketFactory ?? ((url2) => new WebSocket(url2)))(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
     await new Promise((resolve10, reject) => {
@@ -68069,7 +68073,7 @@ var AdaptiveTransport = class extends BaseTransport {
       const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken;
       if (this.lifetime !== lifetime || !this.lease?.canDetach())
         return;
-      const socket = new WebSocket(this.url);
+      const socket = (this.options.controlSocketFactory ?? ((url2) => new WebSocket(url2)))(this.url);
       this.socket = socket;
       socket.binaryType = "arraybuffer";
       this.recoveryOpeningTimer = setTimeout(() => {
@@ -94830,8 +94834,10 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", `Method ${method} is not supported by Antigravity ACP adapter.`);
   }
   async respond(_id, _result) {
+    throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", "Antigravity interactive approval responses are not supported.");
   }
   async respondError(_id, _code, _message) {
+    throw new AntigravityAcpError("METHOD_NOT_SUPPORTED", "Antigravity interactive approval responses are not supported.");
   }
   onInbound(handler) {
     this.inboundHandlers.add(handler);
@@ -95865,10 +95871,29 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
   let content = "";
   try {
     const filePath = await transcriptPath(baseDir, conversationId);
-    if (filePath === void 0 || (await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return [];
-    content = await fs3.readFile(filePath, "utf-8");
-  } catch {
-    return [];
+    if (filePath === void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript is unavailable.");
+    if ((await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
+    }
+    const handle = await fs3.open(filePath, "r");
+    try {
+      const parts = [];
+      let size2 = 0;
+      while (true) {
+        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size2));
+        const { bytesRead } = await handle.read(chunk);
+        if (!bytesRead) break;
+        size2 += bytesRead;
+        if (size2 > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
+        parts.push(chunk.subarray(0, bytesRead));
+      }
+      content = Buffer.concat(parts).toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript could not be read.");
   }
   const lines = content.split("\n");
   const events = [];
@@ -95894,8 +95919,12 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
     try {
       record11 = JSON.parse(trimmed);
     } catch {
-      continue;
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an incomplete or invalid record.");
     }
+    if (record11 === null || typeof record11 !== "object" || typeof record11.type !== "string") {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an invalid record.");
+    }
+    if (record11.truncated_fields?.length) throw new RpcError("HISTORY_INCOMPLETE", "The native transcript reports truncated content.");
     const time3 = record11.created_at ? new Date(record11.created_at).getTime() : Date.now();
     if (record11.type === "USER_INPUT") {
       if (turnOpen) {
@@ -95908,7 +95937,8 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       push2("turn/start", { turn: currentTurn }, time3);
       push2("step/start", { turn: currentTurn, step: 1 }, time3);
       const text = cleanUserPrompt(record11.content);
-      const images = (await Promise.all(agyImageReferences(record11.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
+      const images = await Promise.all(agyImageReferences(record11.content ?? "").map((path) => readAgyImage(conversationId, path)));
+      if (images.some((image) => image === void 0)) throw new RpcError("HISTORY_INCOMPLETE", "A native transcript image is unavailable.");
       push2("user/message", {
         id: `user:${record11.step_index}`,
         role: "user",
@@ -95923,9 +95953,12 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
         push2("step/start", { turn: currentTurn, step: 1 }, time3);
       }
       if (Array.isArray(record11.tool_calls)) {
+        const names = /* @__PURE__ */ new Map();
         for (const call of record11.tool_calls) {
           const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record11.step_index}:${toolName}`;
+          const index = names.get(toolName) ?? 0;
+          names.set(toolName, index + 1);
+          const callId = `${record11.step_index}:${toolName}${index ? `:${index}` : ""}`;
           push2("tool/call", {
             turn: currentTurn,
             step: 1,
@@ -95934,16 +95967,31 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
             arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
             toolCallId: callId,
             toolName,
-            status: call.status === "ERROR" ? "failed" : "finished"
+            status: call.status === "ERROR" ? "failed" : call.status === "CALLING" || call.status === "EXECUTING" ? "pending" : "finished"
           }, time3, false);
+          if (call.result !== void 0) push2("tool/result", {
+            turn: currentTurn,
+            step: 1,
+            message: {
+              id: `${callId}:result`,
+              role: "user",
+              content: [{
+                type: "tool-result",
+                toolCallId: callId,
+                content: [{ type: "text", text: typeof call.result === "string" ? call.result : JSON.stringify(call.result) }],
+                ...call.status === "ERROR" ? { isError: true } : {}
+              }],
+              source: { kind: "tool", callId }
+            }
+          }, time3, true);
         }
       }
-      if (record11.content && record11.content.trim() !== "") {
+      if (record11.content?.trim() || record11.thinking?.trim()) {
         const contentBlocks2 = [];
         if (record11.thinking && record11.thinking.trim() !== "") {
           contentBlocks2.push({ type: "reasoning", text: record11.thinking.trim() });
         }
-        contentBlocks2.push({ type: "text", text: record11.content.trim() });
+        if (record11.content?.trim()) contentBlocks2.push({ type: "text", text: record11.content });
         push2("assistant/message", {
           turn: currentTurn,
           step: 1,
@@ -95991,14 +96039,15 @@ async function querySqliteJson(dbPath, sql, params = []) {
     const { stdout } = await execFileAsync3("sqlite3", [dbPath, "-json", formattedSql]);
     return JSON.parse(stdout || "[]");
   } catch {
-    return [];
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native conversation database could not be read.");
   }
 }
 async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
   try {
     await fs3.stat(dbPath);
-  } catch {
-    return [];
+  } catch (error62) {
+    if (error62.code === "ENOENT") return [];
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native workspace index could not be read.");
   }
   const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
   const rows = await querySqliteJson(dbPath, sql);
@@ -96035,26 +96084,45 @@ async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemin
   return verified;
 }
 async function readTranscriptSummary(baseDir, conversationId) {
+  const path = await transcriptPath(baseDir, conversationId);
+  if (path === void 0) return void 0;
   try {
-    const path = await transcriptPath(baseDir, conversationId);
-    if (path === void 0) return void 0;
     const stat11 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
+    let firstLine;
     try {
-      const buffer3 = Buffer.alloc(4096);
-      const { bytesRead } = await handle.read(buffer3, 0, buffer3.length, 0);
-      const firstLine = buffer3.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-      if (!firstLine) return void 0;
-      const record11 = JSON.parse(firstLine);
-      if (record11.type !== "USER_INPUT") return void 0;
-      const title = cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : void 0);
-      if (!title) return void 0;
-      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs, updatedAt: stat11.mtimeMs };
+      const parts = [];
+      let size2 = 0;
+      while (true) {
+        const buffer3 = Buffer.alloc(Math.min(4096, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size2));
+        const { bytesRead } = await handle.read(buffer3);
+        if (!bytesRead) break;
+        const newline = buffer3.subarray(0, bytesRead).indexOf(10);
+        const part = buffer3.subarray(0, newline < 0 ? bytesRead : newline);
+        size2 += part.length;
+        if (size2 > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError("HISTORY_TOO_LARGE", "The native transcript summary exceeds the history limit.");
+        parts.push(part);
+        if (newline >= 0) break;
+      }
+      firstLine = Buffer.concat(parts).toString("utf8");
     } finally {
       await handle.close();
     }
-  } catch {
-    return void 0;
+    if (!firstLine.trim()) return void 0;
+    let record11;
+    try {
+      record11 = JSON.parse(firstLine);
+    } catch {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript summary contains an invalid record.");
+    }
+    if (!record11 || typeof record11.type !== "string" || record11.content !== void 0 && typeof record11.content !== "string") {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript summary contains an invalid record.");
+    }
+    const title = record11.type === "USER_INPUT" ? cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : "Untitled Session") : "Untitled Session";
+    return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs, updatedAt: stat11.mtimeMs };
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript summary could not be read.");
   }
 }
 async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain"), dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db")) {
@@ -96082,46 +96150,23 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
       });
     }
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-  } catch {
+  } catch (error62) {
+    if (error62.code !== "ENOENT") throw error62;
+    if (requestedWorkspace !== void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native workspace history index is unavailable.");
   }
-  if (requestedWorkspace !== void 0) return [];
+  if (requestedWorkspace !== void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native workspace history index is unavailable.");
   let dirEntries;
   try {
     dirEntries = await fs3.readdir(baseDir);
-  } catch {
-    return [];
+  } catch (error62) {
+    if (error62.code === "ENOENT") return [];
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native history directory could not be read.");
   }
   const results = [];
   for (const entry of dirEntries) {
     if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    try {
-      const path = await transcriptPath(baseDir, entry);
-      if (path === void 0) continue;
-      const s = await fs3.stat(path);
-      const handle = await fs3.open(path, "r");
-      try {
-        const buf = Buffer.alloc(4096);
-        const { bytesRead } = await handle.read(buf, 0, 4096, 0);
-        const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-        if (firstLine) {
-          const parsed = JSON.parse(firstLine);
-          const rawPrompt = cleanUserPrompt(parsed.content);
-          const title = rawPrompt ? rawPrompt.split("\n")[0]?.trim().slice(0, 40) : void 0;
-          if (title) {
-            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s.mtimeMs;
-            results.push({
-              conversationId: entry,
-              title,
-              createdAt,
-              updatedAt: s.mtimeMs
-            });
-          }
-        }
-      } finally {
-        await handle.close();
-      }
-    } catch {
-    }
+    const summary3 = await readTranscriptSummary(baseDir, entry);
+    if (summary3 !== void 0) results.push(summary3);
   }
   results.sort((a, b) => b.updatedAt - a.updatedAt);
   return results.slice(0, limit);
@@ -96148,8 +96193,9 @@ async function transcriptPath(baseDir, conversationId) {
     const root2 = await fs3.realpath(baseDir);
     const expected = join11(root2, conversationId, ".system_generated", "logs", "transcript.jsonl");
     return await fs3.realpath(expected) === expected ? expected : void 0;
-  } catch {
-    return void 0;
+  } catch (error62) {
+    if (error62.code === "ENOENT") return void 0;
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript path could not be read.");
   }
 }
 

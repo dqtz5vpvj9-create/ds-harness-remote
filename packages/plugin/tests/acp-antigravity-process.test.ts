@@ -8,6 +8,12 @@ import { cursorBinaryCandidates } from '../src/acp/gateway.js'
 import type { SafeLogger } from '../src/logging.js'
 
 describe('AntigravityAcpClient', () => {
+  it('rejects unsupported approval responses instead of acknowledging a no-op', async () => {
+    const client = new AntigravityAcpClient('agy', logger())
+    await expect(client.respond('request', { decision: 'allow' })).rejects.toMatchObject({ code: 'METHOD_NOT_SUPPORTED' })
+    await expect(client.respondError('request', -32000, 'cancelled')).rejects.toMatchObject({ code: 'METHOD_NOT_SUPPORTED' })
+    await client.close()
+  })
   it('handles stream-json init, prompt and step_updates', async () => {
     const fake = fakeProcess()
     const outbound: Array<Record<string, unknown>> = []

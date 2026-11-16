@@ -1,7 +1,8 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm, utimes, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, utimes, symlink, truncate } from 'node:fs/promises'
+import { MAX_AGENT_ACP_TRANSFER_BYTES } from '@dsh-remote/protocol'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -257,9 +258,9 @@ describe('TranscriptLoader', () => {
             await writeTranscript('foreign-session', [
               { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Foreign' },
             ])
-            expect(
-              await discoverAntigravitySessions(join(base, 'project'), 10, base, join(base, 'missing.db')),
-            ).toEqual([])
+            await expect(
+              discoverAntigravitySessions(join(base, 'project'), 10, base, join(base, 'missing.db')),
+            ).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
           },
         },
       ],
@@ -275,10 +276,65 @@ describe('TranscriptLoader', () => {
     const brain = join(base, 'brain')
     await mkdir(brain)
     await symlink(join(base, 'outside-session'), join(brain, 'linked-session'), process.platform === 'win32' ? 'junction' : 'dir')
-    expect(await loadTranscriptEvents('../outside-session', 'remote', brain)).toEqual([])
-    expect(await loadTranscriptEvents('..\\outside-session', 'remote', brain)).toEqual([])
-    expect(await loadTranscriptEvents('linked-session', 'remote', brain)).toEqual([])
+    await expect(loadTranscriptEvents('../outside-session', 'remote', brain)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
+    await expect(loadTranscriptEvents('..\\outside-session', 'remote', brain)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
+    await expect(loadTranscriptEvents('linked-session', 'remote', brain)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
     expect(await discoverAntigravitySessions('', 10, brain, join(base, 'missing.db'))).toEqual([])
+  })
+
+  it('distinguishes empty history from missing, corrupt, incomplete and oversized history', async () => {
+    const path = await writeTranscript('conversation', [])
+    expect(await loadTranscriptEvents('conversation', 'remote', base)).toEqual([])
+    await expect(loadTranscriptEvents('missing', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
+    for (const broken of ['{"type":"USER_INPUT"}\n{', '{invalid}\n', 'null\n']) {
+      await writeFile(path, broken)
+      await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+    }
+    await truncate(path, MAX_AGENT_ACP_TRANSFER_BYTES + 1)
+    await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_TOO_LARGE' })
+  })
+
+  it('preserves tool output and reasoning without text, and distinguishes duplicate tool calls', async () => {
+    await writeTranscript('conversation', [{ type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt,
+      thinking: 'The only recorded content', tool_calls: [
+        { name: 'shell', args: { command: 'first' }, result: 'first\noutput', status: 'SUCCESS' },
+        { name: 'shell', args: { command: 'second' }, result: { exitCode: 2 }, status: 'ERROR' },
+      ],
+    }])
+    const events = await loadTranscriptEvents('conversation', 'remote', base)
+    expect(events.filter(row => row.event.type === 'tool/call').map(row => row.event.data)).toMatchObject([
+      { callId: '2:shell' }, { callId: '2:shell:1' },
+    ])
+    expect(events.filter(row => row.event.type === 'tool/result').map(row => row.event.data)).toMatchObject([
+      { message: { content: [{ toolCallId: '2:shell', content: [{ text: 'first\noutput' }] }] } },
+      { message: { content: [{ toolCallId: '2:shell:1', isError: true, content: [{ text: '{"exitCode":2}' }] }] } },
+    ])
+    expect(events.find(row => row.event.type === 'assistant/message')?.event.data).toMatchObject({
+      message: { content: [{ type: 'reasoning', text: 'The only recorded content' }] },
+    })
+  })
+
+  it('reports damaged databases and truncated records without erasing existing history', async () => {
+    const dbPath = join(base, 'broken.db')
+    await writeFile(dbPath, 'not a database')
+    await expect(discoverAntigravitySessions('', 30, base, dbPath)).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
+    await writeTranscript('conversation', [{ type: 'PLANNER_RESPONSE', step_index: 1,
+      created_at: createdAt, content: 'partial', truncated_fields: ['content'],
+    }])
+    await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  })
+
+  it('keeps long first prompts in the catalog and surfaces corrupt summaries', async () => {
+    const title = 'A very long real first prompt '
+    const path = await writeTranscript('long-conversation', [{ type: 'USER_INPUT', step_index: 1,
+      created_at: createdAt, content: title + 'x'.repeat(12000),
+    }])
+    const dbPath = join(base, 'missing.db')
+    expect(await discoverAntigravitySessions('', 30, base, dbPath)).toMatchObject([
+      { conversationId: 'long-conversation', title: (title + 'x'.repeat(40)).slice(0, 40) },
+    ])
+    await writeFile(path, '{broken')
+    await expect(discoverAntigravitySessions('', 30, base, dbPath)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
   })
 
 })

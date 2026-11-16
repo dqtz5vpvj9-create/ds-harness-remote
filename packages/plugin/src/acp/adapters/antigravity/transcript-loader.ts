@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import type { StepLogRecord } from './types.js'
+import { RpcError } from '../../../safe-error.js'
 
 // Load prefix-only Node builtins natively, including under older Vite runners.
 const nodeRequire = createRequire(import.meta.url)
@@ -39,10 +40,29 @@ export async function loadTranscriptEvents(
   let content = ''
   try {
     const filePath = await transcriptPath(baseDir, conversationId)
-    if (filePath === undefined || (await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return []
-    content = await fs.readFile(filePath, 'utf-8')
-  } catch {
-    return []
+    if (filePath === undefined) throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript is unavailable.')
+    if ((await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript exceeds the history transfer limit.')
+    }
+    // Bound the actual read too: a concurrently growing transcript must not
+    // allocate beyond the transfer budget after passing the initial stat.
+    const handle = await fs.open(filePath, 'r')
+    try {
+      const parts: Buffer[] = []
+      let size = 0
+      while (true) {
+        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size))
+        const { bytesRead } = await handle.read(chunk)
+        if (!bytesRead) break
+        size += bytesRead
+        if (size > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript exceeds the history transfer limit.')
+        parts.push(chunk.subarray(0, bytesRead))
+      }
+      content = Buffer.concat(parts).toString('utf8')
+    } finally { await handle.close() }
+  } catch (error) {
+    if (error instanceof RpcError) throw error
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript could not be read.')
   }
 
   const lines = content.split('\n')
@@ -71,8 +91,14 @@ export async function loadTranscriptEvents(
     try {
       record = JSON.parse(trimmed) as StepLogRecord
     } catch {
-      continue
+      // Never let an incomplete append or corrupt record replace a good cache
+      // with a superficially successful, shorter history.
+      throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript contains an incomplete or invalid record.')
     }
+    if (record === null || typeof record !== 'object' || typeof record.type !== 'string') {
+      throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript contains an invalid record.')
+    }
+    if (record.truncated_fields?.length) throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript reports truncated content.')
 
     const time = record.created_at ? new Date(record.created_at).getTime() : Date.now()
 
@@ -88,8 +114,8 @@ export async function loadTranscriptEvents(
       push('step/start', { turn: currentTurn, step: 1 }, time)
 
       const text = cleanUserPrompt(record.content)
-      const images = (await Promise.all(agyImageReferences(record.content ?? '').map(path => readAgyImage(conversationId, path))))
-        .filter((image): image is Record<string, unknown> => image !== undefined)
+      const images = await Promise.all(agyImageReferences(record.content ?? '').map(path => readAgyImage(conversationId, path)))
+      if (images.some(image => image === undefined)) throw new RpcError('HISTORY_INCOMPLETE', 'A native transcript image is unavailable.')
       push('user/message', {
         id: `user:${record.step_index}`,
         role: 'user',
@@ -105,9 +131,12 @@ export async function loadTranscriptEvents(
       }
 
       if (Array.isArray(record.tool_calls)) {
+        const names = new Map<string, number>()
         for (const call of record.tool_calls) {
           const toolName = (typeof call.name === 'string' && call.name.length > 0) ? call.name : 'tool'
-          const callId = `${record.step_index}:${toolName}`
+          const index = names.get(toolName) ?? 0
+          names.set(toolName, index + 1)
+          const callId = `${record.step_index}:${toolName}${index ? `:${index}` : ''}`
           push('tool/call', {
             turn: currentTurn,
             step: 1,
@@ -116,17 +145,26 @@ export async function loadTranscriptEvents(
             arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}',
             toolCallId: callId,
             toolName,
-            status: call.status === 'ERROR' ? 'failed' : 'finished',
+            status: call.status === 'ERROR' ? 'failed' : call.status === 'CALLING' || call.status === 'EXECUTING' ? 'pending' : 'finished',
           }, time, false)
+          if (call.result !== undefined) push('tool/result', {
+            turn: currentTurn, step: 1, message: {
+              id: `${callId}:result`, role: 'user', content: [{
+                type: 'tool-result', toolCallId: callId,
+                content: [{ type: 'text', text: typeof call.result === 'string' ? call.result : JSON.stringify(call.result) }],
+                ...(call.status === 'ERROR' ? { isError: true } : {}),
+              }], source: { kind: 'tool', callId },
+            },
+          }, time, true)
         }
       }
 
-      if (record.content && record.content.trim() !== '') {
+      if (record.content?.trim() || record.thinking?.trim()) {
         const contentBlocks: Array<{ type: string; text: string }> = []
         if (record.thinking && record.thinking.trim() !== '') {
           contentBlocks.push({ type: 'reasoning', text: record.thinking.trim() })
         }
-        contentBlocks.push({ type: 'text', text: record.content.trim() })
+        if (record.content?.trim()) contentBlocks.push({ type: 'text', text: record.content })
 
         push('assistant/message', {
           turn: currentTurn,
@@ -188,7 +226,7 @@ async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params:
     const { stdout } = await execFileAsync('sqlite3', [dbPath, '-json', formattedSql])
     return JSON.parse(stdout || '[]') as T[]
   } catch {
-    return []
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native conversation database could not be read.')
   }
 }
 
@@ -198,8 +236,9 @@ export async function discoverAntigravityWorkspaces(
 ): Promise<string[]> {
   try {
     await fs.stat(dbPath)
-  } catch {
-    return []
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native workspace index could not be read.')
   }
 
   const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;"
@@ -244,26 +283,43 @@ export async function discoverAntigravityWorkspaces(
 }
 
 async function readTranscriptSummary(baseDir: string, conversationId: string): Promise<DiscoveredSession | undefined> {
+  const path = await transcriptPath(baseDir, conversationId)
+  if (path === undefined) return undefined
   try {
-    const path = await transcriptPath(baseDir, conversationId)
-    if (path === undefined) return undefined
     const stat = await fs.stat(path)
     const handle = await fs.open(path, 'r')
+    let firstLine: string
     try {
-      const buffer = Buffer.alloc(4096)
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
-      const firstLine = buffer.subarray(0, bytesRead).toString('utf-8').split('\n')[0]
-      if (!firstLine) return undefined
-      const record = JSON.parse(firstLine) as StepLogRecord
-      if (record.type !== 'USER_INPUT') return undefined
-      const title = cleanUserPrompt(record.content).split('\n')[0]?.trim().slice(0, 40) || (agyImageReferences(record.content ?? '').length > 0 ? 'Image' : undefined)
-      if (!title) return undefined
-      return { conversationId, title, createdAt: record.created_at ? new Date(record.created_at).getTime() : stat.mtimeMs, updatedAt: stat.mtimeMs }
-    } finally {
-      await handle.close()
+      const parts: Buffer[] = []
+      let size = 0
+      while (true) {
+        const buffer = Buffer.alloc(Math.min(4096, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size))
+        const { bytesRead } = await handle.read(buffer)
+        if (!bytesRead) break
+        const newline = buffer.subarray(0, bytesRead).indexOf(10)
+        const part = buffer.subarray(0, newline < 0 ? bytesRead : newline)
+        size += part.length
+        if (size > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript summary exceeds the history limit.')
+        parts.push(part)
+        if (newline >= 0) break
+      }
+      firstLine = Buffer.concat(parts).toString('utf8')
+    } finally { await handle.close() }
+    if (!firstLine.trim()) return undefined
+    let record: StepLogRecord
+    try { record = JSON.parse(firstLine) as StepLogRecord }
+    catch { throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript summary contains an invalid record.') }
+    if (!record || typeof record.type !== 'string' || (record.content !== undefined && typeof record.content !== 'string')) {
+      throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript summary contains an invalid record.')
     }
-  } catch {
-    return undefined
+    // A leading system record still establishes a durable conversation.
+    const title = record.type === 'USER_INPUT'
+      ? cleanUserPrompt(record.content).split('\n')[0]?.trim().slice(0, 40) || (agyImageReferences(record.content ?? '').length > 0 ? 'Image' : 'Untitled Session')
+      : 'Untitled Session'
+    return { conversationId, title, createdAt: record.created_at ? new Date(record.created_at).getTime() : stat.mtimeMs, updatedAt: stat.mtimeMs }
+  } catch (error) {
+    if (error instanceof RpcError) throw error
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript summary could not be read.')
   }
 }
 
@@ -304,52 +360,29 @@ export async function discoverAntigravitySessions(
       })
     }
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
-  } catch {
-    // Unscoped discovery may fall back to transcript scanning without a database.
+  } catch (error) {
+    // Only an absent database permits an unscoped filesystem fallback. A
+    // failed query cannot replace an established catalog with an empty list.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    if (requestedWorkspace !== undefined) throw new RpcError('HISTORY_UNAVAILABLE', 'The native workspace history index is unavailable.')
   }
   // A transcript alone does not establish which project it belongs to.
-  if (requestedWorkspace !== undefined) return []
+  if (requestedWorkspace !== undefined) throw new RpcError('HISTORY_UNAVAILABLE', 'The native workspace history index is unavailable.')
 
   // 2. Fallback to filesystem scanning
   let dirEntries: string[]
   try {
     dirEntries = await fs.readdir(baseDir)
-  } catch {
-    return []
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native history directory could not be read.')
   }
 
   const results: DiscoveredSession[] = []
   for (const entry of dirEntries) {
     if (entry === 'tempmediaStorage' || !entry.includes('-')) continue
-    try {
-      const path = await transcriptPath(baseDir, entry)
-      if (path === undefined) continue
-      const s = await fs.stat(path)
-      const handle = await fs.open(path, 'r')
-      try {
-        const buf = Buffer.alloc(4096)
-        const { bytesRead } = await handle.read(buf, 0, 4096, 0)
-        const firstLine = buf.subarray(0, bytesRead).toString('utf-8').split('\n')[0]
-        if (firstLine) {
-          const parsed = JSON.parse(firstLine) as StepLogRecord
-          const rawPrompt = cleanUserPrompt(parsed.content)
-          const title = rawPrompt ? rawPrompt.split('\n')[0]?.trim().slice(0, 40) : undefined
-          if (title) {
-            const createdAt = parsed.created_at ? new Date(parsed.created_at).getTime() : s.mtimeMs
-            results.push({
-              conversationId: entry,
-              title,
-              createdAt,
-              updatedAt: s.mtimeMs,
-            })
-          }
-        }
-      } finally {
-        await handle.close()
-      }
-    } catch {
-      // ignore
-    }
+    const summary = await readTranscriptSummary(baseDir, entry)
+    if (summary !== undefined) results.push(summary)
   }
 
   results.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -374,5 +407,8 @@ async function transcriptPath(baseDir: string, conversationId: string): Promise<
     const root = await fs.realpath(baseDir)
     const expected = join(root, conversationId, '.system_generated', 'logs', 'transcript.jsonl')
     return await fs.realpath(expected) === expected ? expected : undefined
-  } catch { return undefined }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript path could not be read.')
+  }
 }

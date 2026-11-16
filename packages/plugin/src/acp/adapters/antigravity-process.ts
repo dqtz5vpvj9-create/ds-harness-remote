@@ -282,11 +282,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
   }
 
   async respond(_id: string | number, _result: unknown): Promise<void> {
-    // Currently auto-approved or handled via session permissions
+    throw new AntigravityAcpError('METHOD_NOT_SUPPORTED', 'Antigravity interactive approval responses are not supported.')
   }
 
   async respondError(_id: string | number, _code: number, _message: string): Promise<void> {
-    // Currently auto-approved or handled via session permissions
+    throw new AntigravityAcpError('METHOD_NOT_SUPPORTED', 'Antigravity interactive approval responses are not supported.')
   }
 
   onInbound(handler: CursorAcpInboundHandler): () => void {
