@@ -1,3 +1,4 @@
+import type { ControlSocket, ControlSocketFactory } from './shared-control.js'
 import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
   PROTOCOL_VERSION,
@@ -18,6 +19,7 @@ import {
 import { BaseTransport } from './transport.js'
 import { fromBase64Url, toBase64Url } from './util.js'
 
+export * from './shared-control.js'
 export * from './transport.js'
 export * from './rtc-adapter.js'
 export * from './rtc-chunking.js'
@@ -26,6 +28,7 @@ export * from './adaptive-transport.js'
 export * from './upgraded-rtc-transport.js'
 
 export interface RelayTransportOptions {
+  controlSocketFactory?: ControlSocketFactory
   role: 'client'
   deviceId: string
   accessToken: string
@@ -39,7 +42,7 @@ type RelayAssignment = Pick<ConnectAcceptedPayload, 'relayEndpoint' | 'relayTick
 
 export class RelayTransport extends BaseTransport {
   private readonly handshakeHandlers = new Set<(step: number, data: Uint8Array) => void>()
-  private socket?: WebSocket
+  private socket?: ControlSocket
   private dataSocket?: WebSocket
   private bytesSent = 0
   private bytesReceived = 0
@@ -62,7 +65,7 @@ export class RelayTransport extends BaseTransport {
 
   async connect(): Promise<void> {
     if (this.socket !== undefined) return
-    this.socket = new WebSocket(this.url)
+    this.socket = (this.options.controlSocketFactory ?? (url => new WebSocket(url)))(this.url)
     this.controlFrameLimits = {}
     this.socket.binaryType = 'arraybuffer'
     await new Promise<void>((resolve, reject) => {

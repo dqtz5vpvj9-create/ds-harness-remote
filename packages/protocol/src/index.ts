@@ -408,6 +408,8 @@ export interface HelloAckPayload {
 }
 
 export interface ConnectRequestPayload {
+  /** Correlates independently pending host links on a shared control channel. */
+  requestId?: string
   hostDeviceId: string
   preferredTransports: Array<'lan' | 'p2p' | 'turn' | 'relay'>
 }
@@ -428,6 +430,8 @@ export interface ConnectIncomingPayload {
 }
 
 export interface ConnectAcceptedPayload {
+  /** Correlates independently pending host links on a shared control channel. */
+  requestId?: string
   relayRecoveryTicket?: string
   recoveryTicket?: string
   connectionId: string
@@ -439,6 +443,8 @@ export interface ConnectAcceptedPayload {
 }
 
 export interface ConnectRejectedPayload {
+  /** Correlates independently pending host links on a shared control channel. */
+  requestId?: string
   connectionId: string
   code?: string
   message?: string
@@ -452,6 +458,8 @@ export interface SecureHandshakePayload {
 }
 
 export interface ControlErrorPayload {
+  /** Correlates independently pending host links on a shared control channel. */
+  requestId?: string
   /** §23 defines standard codes. Subsystems can add names such as CODEX_* and FILE_VIEWER_*. */
   code: ErrorCode | (string & {})
   message: string
@@ -1174,6 +1182,7 @@ export function parseRemoteWorkspaceTypes(value: unknown): RemoteWorkspaceTypeDe
 }
 
 export const connectRequestPayloadSchema = z.object({
+  requestId: z.string().min(1).max(128).optional(),
   hostDeviceId: z.string().min(1),
   preferredTransports: z.array(z.unknown()).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES).pipe(
     z.array(transportEnum),
@@ -1197,6 +1206,7 @@ export const connectIncomingPayloadSchema = z.object({
 })
 
 export const connectAcceptedPayloadSchema = z.object({
+  requestId: z.string().min(1).max(128).optional(),
   relayRecoveryTicket: z.string().min(1).max(4096).optional(),
   recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
@@ -1207,6 +1217,7 @@ export const connectAcceptedPayloadSchema = z.object({
 })
 
 export const connectRejectedPayloadSchema = z.object({
+  requestId: z.string().min(1).max(128).optional(),
   connectionId: z.string().min(1),
   code: z.string().optional(),
   message: z.string().optional(),
@@ -1257,6 +1268,7 @@ export const pingPongPayloadSchema = z.object({
 })
 
 export const controlErrorPayloadSchema = z.object({
+  requestId: z.string().min(1).max(128).optional(),
   code: z.string().min(1),
   message: z.string().min(1),
   retryable: z.boolean().optional(),

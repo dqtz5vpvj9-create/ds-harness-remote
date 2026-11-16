@@ -488,6 +488,61 @@ describe('control authorization and encrypted relay', () => {
     expect(await ctx.host.next('error')).toMatchObject({ connectionId: incoming.connectionId })
     expect((await request('/devices', 'GET', undefined, second.accessToken)).status).toBe(401)
   })
+
+  it('isolates two hosts on one negotiated client control socket across replacement and disconnect', async () => {
+    const a = await connection({ clientCapabilities: [...fullCapabilities, 'remote.multi-host.v1'] })
+    await handshake(a)
+    const h = await device('host'), host = await socket(h)
+    await host.next('hello.ack')
+    a.client.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: ['relay'] })
+    const incoming = await host.next('connect.incoming')
+    host.send('connect.accepted', { connectionId: incoming.connectionId })
+    const { connectionId } = await a.client.next('connect.accepted')
+    const b = { h, c: a.c, host, client: a.client, incoming, connectionId }
+    await handshake(b)
+    // Connecting B leaves A's established encrypted channel usable.
+    a.client.send('relay', { connectionId: a.connectionId, targetDeviceId: a.h.deviceId, counter: 0, ciphertext: 'AA' })
+    expect(await a.host.next('relay')).toMatchObject({ connectionId: a.connectionId, counter: 0 })
+    // Reconnecting A replaces only the A link; B keeps its replay counters.
+    a.client.send('connect.request', { hostDeviceId: a.h.deviceId, preferredTransports: ['relay'] })
+    expect(await a.client.next('error')).toMatchObject({ code: 'CONNECTION_REPLACED', connectionId: a.connectionId })
+    await a.host.next('connect.incoming')
+    a.client.send('relay', { connectionId, targetDeviceId: h.deviceId, counter: 0, ciphertext: 'AA' })
+    expect(await host.next('relay')).toMatchObject({ connectionId, counter: 0 })
+    const closed = once(a.host.ws, 'close')
+    a.host.ws.close()
+    await closed
+    a.client.send('relay', { connectionId, targetDeviceId: h.deviceId, counter: 1, ciphertext: 'AA' })
+    expect(await host.next('relay')).toMatchObject({ connectionId, counter: 1 })
+    expect(a.client.messages.filter(m => m.type === 'error' && m.payload.connectionId === connectionId)).toEqual([])
+  })
+
+  it('correlates pending host replies and confines failures and explicit closes to one link', async () => {
+    const a = await connection({ clientCapabilities: [...fullCapabilities, 'remote.multi-host.v1'] })
+    await handshake(a)
+    a.client.send('connect.request', { hostDeviceId: 'offline-host', preferredTransports: ['relay'], requestId: 'offline-request' })
+    expect(await a.client.next('error')).toMatchObject({ code: 'HOST_OFFLINE', requestId: 'offline-request' })
+    const h = await device('host'), host = await socket(h)
+    await host.next('hello.ack')
+    a.client.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: ['relay'], requestId: 'request-b' })
+    const incoming = await host.next('connect.incoming')
+    // A Host cannot spoof the client's correlation identity.
+    host.send('connect.accepted', { connectionId: incoming.connectionId, requestId: 'spoofed' })
+    expect(await a.client.next('connect.accepted')).toMatchObject({ connectionId: incoming.connectionId, requestId: 'request-b' })
+    a.client.send('connection.lease.close', { connectionId: incoming.connectionId })
+    expect(await a.client.next('error')).toMatchObject({ connectionId: incoming.connectionId, requestId: 'request-b', code: 'CONNECTION_CLOSED', retryable: false })
+    a.client.send('relay', { connectionId: a.connectionId, targetDeviceId: a.h.deviceId, counter: 0, ciphertext: 'AA' })
+    expect(await a.host.next('relay')).toMatchObject({ connectionId: a.connectionId })
+  })
+
+  it('retains single-host replacement for clients without the negotiated capability', async () => {
+    const a = await connection()
+    const h = await device('host'), host = await socket(h)
+    await host.next('hello.ack')
+    a.client.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: ['relay'] })
+    await host.next('connect.incoming')
+    expect(await a.client.next('error')).toMatchObject({ code: 'CONNECTION_REPLACED', connectionId: a.connectionId })
+  })
 })
 
 

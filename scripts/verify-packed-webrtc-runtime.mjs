@@ -41,15 +41,17 @@ try {
   assert.equal(runtime.weriftLoaded(), true)
   assert.equal(await runtime.loadWeriftFactory(), await runtime.loadWeriftFactory(), 'reuse cached factory')
 
+  // Match the production negotiation budget. Werift can spend 5 seconds per
+  // peer gathering an unreachable STUN server before finishing its local SDP.
   const received = []
   const echoed = []
   const a = new runtime.RtcDataChannelTransport({
     role: 'initiator', factory: factories[0], iceServers: [],
-    onSignal: signal => b.handleSignal(signal), negotiateTimeoutMs: 8_000,
+    onSignal: signal => b.handleSignal(signal), negotiateTimeoutMs: 12_000,
   })
   const b = new runtime.RtcDataChannelTransport({
     role: 'responder', factory: factories[1], iceServers: [],
-    onSignal: signal => a.handleSignal(signal), negotiateTimeoutMs: 8_000,
+    onSignal: signal => a.handleSignal(signal), negotiateTimeoutMs: 12_000,
   })
   peers.push(a, b)
   a.onMessage(data => echoed.push(Buffer.from(data).toString()))

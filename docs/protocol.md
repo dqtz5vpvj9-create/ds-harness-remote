@@ -417,6 +417,13 @@ Server 展示设备版本和诊断；与 `hello.ack` 的 `serverVersion` 对称�
 `capabilities` 必须是无重复的非空字符串集合。接收端必须忽略未知 capability。
 发送端只能使用双方都支持的 capability。
 
+`remote.multi-host.v1` is negotiated between the Client and Server. A capable
+Client uses one authenticated control socket for independent links to multiple
+Hosts. A new request replaces only its previous link to the same Host; closing
+or reconnecting one Host does not close links to other Hosts. Each link keeps
+its own connection ID, Noise session, replay counters and authorization. Clients
+without this negotiated capability retain the single-Host replacement behavior.
+
 Host 的 `harnessVersion` 优先来自本机 Harness `host.describe.version`；旧 Harness 返回已知
 占位值或不提供该方法时，从当前 `@deepseek-ai/dsh` 运行包读取版本。Host 注册 descriptor
 在可用时携带该值，首次 `hello` 也会再次上报以刷新设备记录。字段同样可选：插件不发送时
@@ -2205,3 +2212,12 @@ When the Host advertises `remote.transport.upgrade.v1` in `harness.transport.des
 - **RPCs & events**: `remote.transport.upgrade.offer` (`{ attemptId, sdp } -> { attemptId, sdp }`), `remote.transport.upgrade.ice` (`{ attemptId, candidate } -> { ok: true }`, with responder trickle ICE emitted as `remote.transport.upgrade.ice` event), `remote.transport.upgrade.activate` (`{ attemptId, transport? } -> { activated, mode, previousLegEndCounter? }`), `remote.transport.upgrade.drain` (`{ attemptId, previousLegEndCounter } -> { ok: true }`), and `remote.transport.upgrade.abort` (`{ attemptId? } -> { ok: true }`).
 - **Authoritative Host path verification**: Tier promotion (`Relay < TURN < P2P < LAN`) strictly trusts the Host's own verified ICE candidate-pair telemetry (`connectionDetails().mode`); client hints never elevate a lower-tier path into `LAN` or `P2P`.
 - **Sequenced framing, watermark draining & bounded reorder**: Upgraded DataChannel frames prepend a 12-byte big-endian sequence header (`'DSHU' || uint64 noiseCounter`) before RTCH chunking. Both endpoints buffer out-of-order frames in `SequencedCiphertextReorderBuffer` (bounded by 256 frames, 4 MiB total bytes, and a 5 s gap timeout) and drain superseded WebRTC legs until `receivingCounter >= previousLegEndCounter` (bounded by a 3 s fallback deadline). Upgrade failure before activation keeps the current carrier intact; DataChannel loss after activation closes the tunnel so normal reconnect recovery runs.
+
+Multi-host clients correlate each `connect.request` with a unique optional
+`requestId` (1–128 characters). The server echoes its stored ID on acceptance,
+rejection, pending-link failure and host-offline errors; it ignores a Host's
+replacement value. Responses without a matching request must never select a
+different Host. A client negotiating `remote.multi-host.v1` may release just one
+link using `connection.lease.close { connectionId }`; this does not close its
+account control socket or any other Host link. Account authorization failures
+remain account-wide. Legacy clients keep the existing single-host behavior.

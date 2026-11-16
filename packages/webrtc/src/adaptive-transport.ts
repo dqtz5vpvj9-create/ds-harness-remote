@@ -1,3 +1,4 @@
+import type { ControlSocket, ControlSocketFactory } from './shared-control.js'
 import { ControlLease } from './control-lease.js'
 import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
@@ -41,6 +42,7 @@ import { fromBase64Url, toBase64Url } from './util.js'
 type RelayAssignment = Pick<ConnectAcceptedPayload, 'relayEndpoint' | 'relayTicket' | 'relayNodeId' | 'relayEpoch'>
 
 export interface AdaptiveTransportOptions {
+  controlSocketFactory?: ControlSocketFactory
   role: 'client'
   deviceId: string
   accessToken: string
@@ -104,7 +106,7 @@ const DEFAULT_PREFERRED_TRANSPORTS = ['lan', 'p2p', 'turn', 'relay'] as const
 export class AdaptiveTransport extends BaseTransport {
   private readonly handshakeHandlers = new Set<(step: number, data: Uint8Array) => void>()
   private readonly sequencedHandlers = new Set<(counter: number | undefined, data: Uint8Array) => void>()
-  private socket?: WebSocket
+  private socket?: ControlSocket
   private dataSocket?: WebSocket
   private connectionId?: string
   private relayCounter = 0
@@ -155,7 +157,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.selected = undefined
     this.connectedAt = undefined
     this.relayCounter = 0
-    this.socket = new WebSocket(this.url)
+    this.socket = (this.options.controlSocketFactory ?? (url => new WebSocket(url)))(this.url)
     this.controlFrameLimits = {}
     this.socket.binaryType = 'arraybuffer'
     await new Promise<void>((resolve, reject) => {
@@ -580,7 +582,8 @@ export class AdaptiveTransport extends BaseTransport {
     this.controlReady = false
     this.socket = undefined
     clearTimeout(this.recoveryOpeningTimer)
-    socket?.close()
+    if (socket?.detach) socket.detach()
+    else socket?.close()
     if (this.recoveryTimer !== undefined) return
     const delay = recoveryDelayMs(this.recoveryAttempt, diagnostic)
     this.recoveryAttempt++
@@ -596,7 +599,7 @@ export class AdaptiveTransport extends BaseTransport {
     try {
       const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken
       if (this.lifetime !== lifetime || !this.lease?.canDetach()) return
-      const socket = new WebSocket(this.url)
+      const socket = (this.options.controlSocketFactory ?? (url => new WebSocket(url)))(this.url)
       this.socket = socket
       socket.binaryType = 'arraybuffer'
       this.recoveryOpeningTimer = setTimeout(() => {

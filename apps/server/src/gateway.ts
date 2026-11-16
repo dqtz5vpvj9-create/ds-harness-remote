@@ -36,7 +36,7 @@ export interface GatewayOptions extends GatewayTimingOptions {
 type ConnectionState = 'awaiting_hello' | 'authenticated' | 'closing' | 'closed'
 
 type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string; evictedTombstoneUntil?: number }
-type Link = { id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number>; preferredTransports: TransportName[]; iceCandidates: number }
+type Link = { requestId?: string; id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number>; preferredTransports: TransportName[]; iceCandidates: number }
 type DroppedLink = { host: string; client: string; expiresAt: number; droppedFrames: number }
 
 /** Keep tombstones long enough for late in-flight frames to drain without CONNECTION_NOT_FOUND storms. */
@@ -261,12 +261,12 @@ export class Gateway {
     if (peer.ws.bufferedAmount > 4 * MAX_RELAY_FRAME_BYTES) { this.disconnect(peer.id, 'SLOW_CONSUMER'); return }
     peer.ws.send(JSON.stringify(frame))
   }
-  private drop(link: Link, code: string): void {
+  private drop(link: Link, code: string, retryable = true): void {
     this.links.delete(link.id)
     this.recordDroppedLink(link)
     for (const id of [link.host, link.client]) {
       const p = this.peers.get(id)
-      if (p && (p.role === 'client' || modernHost(p.version))) this.send(p, createControlFrame('error', { code, message: code, connectionId: link.id, retryable: true }))
+      if (p && (p.role === 'client' || modernHost(p.version))) this.send(p, createControlFrame('error', { code, message: code, connectionId: link.id, ...(id === link.client && link.requestId ? { requestId: link.requestId } : {}), retryable }))
     }
   }
   disconnect(id: string, code: string): void {
@@ -304,7 +304,7 @@ export class Gateway {
     return this.peers.has(link.host) && this.peers.has(link.client)
   }
   private supportedCapabilities(): string[] {
-    return SUPPORTED_TRANSPORTS.filter(capability => capability !== 'transport.turn' || this.turnEnabled)
+    return [...SUPPORTED_TRANSPORTS.filter(capability => capability !== 'transport.turn' || this.turnEnabled), 'remote.multi-host.v1']
   }
   private negotiatedCapabilities(offered: readonly string[]): string[] {
     return this.supportedCapabilities().filter(capability => offered.includes(capability))
@@ -483,6 +483,12 @@ export class Gateway {
           this.send(peer, createControlFrame('error', { code, message: code, connectionId, retryable: false }))
           return
         }
+        const requestId = (frame?.payload as { requestId?: unknown } | undefined)?.requestId
+        if (peer?.role === 'client' && peer.capabilities.includes('remote.multi-host.v1')
+            && frame?.type === 'connect.request' && typeof requestId === 'string' && code !== 'RATE_LIMITED') {
+          this.send(peer, createControlFrame('error', { code, message: code, requestId, retryable: false }))
+          return
+        }
         state = 'closing'
         clearDeadline()
         if (ws.readyState === WebSocket.OPEN) {
@@ -518,7 +524,7 @@ export class Gateway {
         this.disconnect(candidateHost.id, 'CONNECTION_FAILED')
       }
       const host = this.peers.get(request.hostDeviceId)
-      if (!host || host.role !== 'host') { this.send(peer, createControlFrame('error', { code: 'HOST_OFFLINE', message: 'Host is offline.', retryable: true })); return }
+      if (!host || host.role !== 'host') { this.send(peer, createControlFrame('error', { code: 'HOST_OFFLINE', message: 'Host is offline.', requestId: request.requestId, retryable: true })); return }
       this.store.get(host.id)
       if (!request.preferredTransports.includes('relay') || !peer.capabilities.includes('transport.relay') || !host.capabilities.includes('transport.relay')) throw new ApiError('CAPABILITY_NOT_SUPPORTED')
       // The link coordinates only transports both peers actually advertised;
@@ -527,10 +533,17 @@ export class Gateway {
       const preferredTransports = [...new Set(request.preferredTransports)].filter(transport =>
         peer.capabilities.includes(`transport.${transport}`) && host.capabilities.includes(`transport.${transport}`))
       if (preferredTransports.length === 0) throw new ApiError('CAPABILITY_NOT_SUPPORTED')
-      for (const old of this.links.values()) if (old.client === peer.id || (old.host === host.id && !modernHost(host.version))) this.drop(old, 'CONNECTION_REPLACED')
+      // A capable client shares this control socket across independent host links.
+      // Replacing A must not close B or its encrypted data/approval streams.
+      const multiHost = peer.capabilities.includes('remote.multi-host.v1')
+      for (const old of this.links.values()) {
+        if ((old.client === peer.id && (!multiHost || old.host === host.id)) ||
+            (old.host === host.id && !modernHost(host.version))) this.drop(old, 'CONNECTION_REPLACED')
+      }
       if (this.links.size >= 256) throw new ApiError('RATE_LIMITED')
       const link: Link = {
         id: randomUUID(),
+        requestId: request.requestId,
         host: host.id,
         client: peer.id,
         stage: 'pending',
@@ -552,6 +565,10 @@ export class Gateway {
     const id = p.connectionId
     const link = typeof id === 'string' ? this.links.get(id) : undefined
     if (!link || (peer.id !== link.host && peer.id !== link.client)) throw new ApiError('CONNECTION_NOT_FOUND')
+    if (frame.type === 'connection.lease.close' && peer.role === 'client' && peer.capabilities.includes('remote.multi-host.v1')) {
+      this.drop(link, 'CONNECTION_CLOSED', false)
+      return
+    }
     const otherId = peer.id === link.host ? link.client : link.host
     const other = this.peers.get(otherId)
     this.store.get(otherId)
@@ -563,7 +580,7 @@ export class Gateway {
         this.recordDroppedLink(link)
       }
       else link.stage = 'accepted'
-      this.send(other, frame)
+      this.send(other, createControlFrame(frame.type, { ...p, requestId: link.requestId }))
       return
     }
     if (p.targetDeviceId !== otherId || link.stage === 'pending') throw new ApiError('CONNECTION_NOT_FOUND')
