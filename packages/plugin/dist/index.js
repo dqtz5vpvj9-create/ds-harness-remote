@@ -64737,6 +64737,101 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
+// packages/protocol/dist/native-sources.js
+var NATIVE_SOURCE_CALLS = [
+  "hhpi/catalog",
+  "hhpi/resolve",
+  "hhpi/read",
+  "hhpi/operate",
+  "hhpi/receipt",
+  "hhpi/create",
+  "hhpi/resource",
+  "hhpi/upload",
+  "hhpi/nativeCapabilities",
+  "hhpi/nativeCall",
+  "hhpi/nativeReceipt",
+  "hhpi/nativeReply",
+  "hhpi/nativeEvents",
+  "sourceWorkspace/directories",
+  "sourceWorkspace/resolve",
+  "sourceWorkspace/read",
+  "sourceWorkspace/readBytes",
+  "sourceWorkspace/stat",
+  "sourceWorkspace/list",
+  "sourceWorkspace/openDocument",
+  "sourceWorkspace/readDocumentBytes",
+  "sourceWorkspace/inspect",
+  "sourceWorkspace/search",
+  "sourceWorkspace/git",
+  "sourceWorkspace/uploadInputs",
+  "sourceWorkspace/beginUpload",
+  "sourceWorkspace/uploadStatus",
+  "sourceWorkspace/finishUpload",
+  "sourceWorkspace/cancelUpload",
+  "sourceWorkspace/save",
+  "sourceWorkspace/manage",
+  "sourceWorkspace/receipt",
+  "sourceTerminal/environment",
+  "sourceTerminal/shells",
+  "sourceTerminal/list",
+  "sourceTerminal/create",
+  "sourceTerminal/rename",
+  "sourceTerminal/close",
+  "sourceTerminal/write",
+  "sourceTerminal/resize",
+  "sourceNavigation/locatePosition",
+  "sourceNavigation/resumeContext"
+];
+var NATIVE_SOURCE_STREAMS = [
+  "hhpi/changes",
+  "sourceWorkspace/changes",
+  "sourceTerminal/follow",
+  "sourceTerminal/retain"
+];
+var NATIVE_SOURCE_BINARY_RESULTS = ["sourceWorkspace/readBytes", "sourceWorkspace/readDocumentBytes"];
+var responseRetryReads = /* @__PURE__ */ new Set([
+  "session/list",
+  "session/page",
+  "session/events",
+  "session/attachment",
+  "session/projections",
+  "session/search",
+  "session/modelCatalog",
+  "workspaceFiles/list",
+  "workspaceFiles/stat",
+  "workspaceFiles/read",
+  "workspaceFiles/readBytes",
+  "workspaceFiles/readAll",
+  "workspaceFiles/readRelated",
+  "officeToPdf/render",
+  "officeToPdf/generation",
+  "hhpi/catalog",
+  "hhpi/resolve",
+  "hhpi/read",
+  "hhpi/receipt",
+  "hhpi/resource",
+  "hhpi/nativeCapabilities",
+  "hhpi/nativeReceipt",
+  "hhpi/nativeEvents",
+  "sourceWorkspace/directories",
+  "sourceWorkspace/resolve",
+  "sourceWorkspace/read",
+  "sourceWorkspace/readBytes",
+  "sourceWorkspace/stat",
+  "sourceWorkspace/list",
+  "sourceWorkspace/openDocument",
+  "sourceWorkspace/readDocumentBytes",
+  "sourceWorkspace/inspect",
+  "sourceWorkspace/search",
+  "sourceWorkspace/git",
+  "sourceWorkspace/uploadInputs",
+  "sourceWorkspace/uploadStatus",
+  "sourceWorkspace/receipt"
+]);
+function canRepeatAfterOversizedResponse(endpoint) {
+  return responseRetryReads.has(endpoint);
+}
+
 // packages/protocol/dist/wire-json.js
 function parseWireJson(input4) {
   try {
@@ -66430,6 +66525,281 @@ function fromBase64Url(value) {
   return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
+// packages/webrtc/dist/shared-control.js
+var MULTI_HOST_CAPABILITY = "remote.multi-host.v1";
+var SharedControlConnection = class {
+  url;
+  createSocket;
+  socket;
+  hello;
+  ack;
+  links = /* @__PURE__ */ new Set();
+  requests = /* @__PURE__ */ new Map();
+  connections = /* @__PURE__ */ new Map();
+  // Keep closed pending requests until their acceptance/rejection arrives.
+  // A late acceptance is closed, never assigned to another host.
+  cancelled = /* @__PURE__ */ new Set();
+  disposed = false;
+  constructor(url2, createSocket5 = (url3) => new WebSocket(url3)) {
+    this.url = url2;
+    this.createSocket = createSocket5;
+  }
+  createHostSocket = (url2) => {
+    if (this.disposed)
+      throw new Error("Shared control connection is closed");
+    if (url2 !== this.url)
+      throw new Error("Host control URL does not match the account");
+    if (this.links.size + this.cancelled.size >= 256)
+      throw new Error("Shared control capacity exceeded");
+    const link3 = new HostControlSocket(this);
+    this.links.add(link3);
+    if (!this.socket)
+      this.connect();
+    if (this.socket?.readyState === WebSocket.OPEN)
+      queueMicrotask(() => link3.opened());
+    return link3;
+  };
+  get bufferedAmount() {
+    return this.socket?.bufferedAmount ?? 0;
+  }
+  /** Called by the account owner only after refreshing its own credentials.
+   * Existing authorized links keep their control connection and Noise state. */
+  refreshAccessToken(deviceId, previous, next) {
+    if (!this.hello)
+      return;
+    if (this.hello.deviceId !== deviceId || this.hello.accessToken !== previous || !next) {
+      throw new Error("Credential refresh does not belong to the shared account");
+    }
+    this.hello = { ...this.hello, accessToken: next };
+  }
+  connect() {
+    const socket = this.createSocket(this.url);
+    this.socket = socket;
+    socket.onopen = () => {
+      for (const link3 of this.links)
+        link3.opened();
+    };
+    socket.onmessage = (event) => {
+      if (this.socket !== socket)
+        return;
+      try {
+        if (typeof event.data !== "string")
+          throw new Error("Control frames must be JSON text");
+        this.receive(decodeControlFrame(event.data), event.data);
+      } catch {
+        this.fail("Invalid shared control frame");
+      }
+    };
+    socket.onerror = (event) => {
+      if (this.socket === socket)
+        for (const link3 of this.links)
+          link3.onerror?.call(link3, event);
+    };
+    socket.onclose = (event) => {
+      if (this.socket !== socket)
+        return;
+      this.reset(event.code, event.reason);
+    };
+  }
+  send(link3, data2) {
+    if (!this.links.has(link3) || this.socket?.readyState !== WebSocket.OPEN)
+      throw new Error("Host control socket is not open");
+    if (typeof data2 !== "string")
+      throw new Error("Control frames must be JSON text");
+    const frame = decodeControlFrame(data2);
+    const payload = frame.payload;
+    if (frame.type === "hello") {
+      const hello = frame.payload;
+      if (hello.role !== "client")
+        throw new Error("Only clients share an account control connection");
+      if (this.hello && (hello.deviceId !== this.hello.deviceId || hello.accessToken !== this.hello.accessToken || JSON.stringify(hello.protocols) !== JSON.stringify(this.hello.protocols) || JSON.stringify(hello.capabilities) !== JSON.stringify(this.hello.capabilities))) {
+        throw new Error("Host link authentication differs from the shared account");
+      }
+      link3.helloSent = true;
+      if (!this.hello) {
+        this.hello = hello;
+        this.socket.send(encodeControlFrame(createControlFrame("hello", {
+          ...hello,
+          capabilities: [.../* @__PURE__ */ new Set([...hello.capabilities, MULTI_HOST_CAPABILITY])]
+        })));
+      }
+      if (this.ack)
+        queueMicrotask(() => link3.deliver(this.ack));
+      return;
+    }
+    if (!link3.helloSent || !this.ack)
+      throw new Error("Shared control has not negotiated multi-host support");
+    if (frame.type === "connect.request") {
+      if (link3.requestId || link3.connectionId)
+        throw new Error("Host link has already requested a connection");
+      link3.requestId = crypto.randomUUID();
+      link3.targetDeviceId = payload.hostDeviceId;
+      this.requests.set(link3.requestId, link3);
+      this.socket.send(encodeControlFrame({ ...frame, payload: { ...payload, requestId: link3.requestId } }));
+      return;
+    }
+    if (frame.type === "pong" || frame.type === "ping")
+      return;
+    if (frame.type === "connection.lease.request" && !link3.connectionId && !link3.requestId && typeof payload.connectionId === "string" && !this.connections.has(payload.connectionId)) {
+      link3.connectionId = payload.connectionId;
+      this.connections.set(payload.connectionId, link3);
+    }
+    if (typeof payload.connectionId !== "string" || payload.connectionId !== link3.connectionId || "targetDeviceId" in payload && link3.targetDeviceId !== void 0 && payload.targetDeviceId !== link3.targetDeviceId) {
+      throw new Error("Control frame does not belong to this host link");
+    }
+    this.socket.send(data2);
+  }
+  receive(frame, raw) {
+    const payload = frame.payload;
+    if (frame.type === "hello.ack") {
+      if (!this.hello || this.ack || !Array.isArray(payload.capabilities) || !payload.capabilities.includes(MULTI_HOST_CAPABILITY)) {
+        throw new Error("Server did not negotiate multi-host control");
+      }
+      this.ack = encodeControlFrame({ ...frame, payload: {
+        ...payload,
+        capabilities: payload.capabilities.filter((value) => value !== MULTI_HOST_CAPABILITY)
+      } });
+      for (const link4 of this.links)
+        if (link4.helloSent)
+          link4.deliver(this.ack);
+      return;
+    }
+    if (frame.type === "ping") {
+      this.socket?.send(encodeControlFrame(createControlFrame("pong", payload)));
+      for (const link4 of this.links)
+        if (link4.helloSent)
+          link4.deliver(raw);
+      return;
+    }
+    if (frame.type === "pong")
+      return;
+    const requestId = typeof payload.requestId === "string" ? payload.requestId : void 0;
+    const connectionId = typeof payload.connectionId === "string" ? payload.connectionId : void 0;
+    if (requestId && this.cancelled.has(requestId)) {
+      if (frame.type === "connect.accepted" && connectionId)
+        this.closeConnection(connectionId);
+      this.cancelled.delete(requestId);
+      return;
+    }
+    const byRequest = requestId ? this.requests.get(requestId) : void 0;
+    const byConnection = connectionId ? this.connections.get(connectionId) : void 0;
+    if (byRequest && byConnection && byRequest !== byConnection)
+      throw new Error("Conflicting control correlation");
+    const link3 = byRequest ?? byConnection;
+    if (frame.type === "connect.accepted" || frame.type === "connect.rejected") {
+      if (!link3 || !requestId || !connectionId || link3.requestId !== requestId)
+        throw new Error("Uncorrelated host acceptance");
+      this.requests.delete(requestId);
+      if (frame.type === "connect.accepted") {
+        link3.connectionId = connectionId;
+        this.connections.set(connectionId, link3);
+      }
+    }
+    if (frame.type === "error" && requestId && byRequest)
+      this.requests.delete(requestId);
+    if (link3) {
+      link3.deliver(raw);
+      return;
+    }
+    if (connectionId || requestId)
+      return;
+    if (frame.type === "error") {
+      for (const current of [...this.links])
+        current.deliver(raw);
+      this.fail("Shared account control failed");
+      return;
+    }
+    throw new Error("Unscoped shared control frame");
+  }
+  release(link3, closeConnection = true) {
+    this.links.delete(link3);
+    if (link3.requestId && this.requests.delete(link3.requestId))
+      this.cancelled.add(link3.requestId);
+    if (link3.connectionId) {
+      this.connections.delete(link3.connectionId);
+      if (closeConnection)
+        this.closeConnection(link3.connectionId);
+    }
+    if (this.links.size === 0) {
+      const socket = this.socket;
+      this.reset(1e3, "");
+      socket?.close();
+    }
+  }
+  closeConnection(connectionId) {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(encodeControlFrame(createControlFrame("connection.lease.close", { connectionId })));
+    }
+  }
+  reset(code, reason) {
+    const links = [...this.links];
+    this.socket = void 0;
+    this.hello = void 0;
+    this.ack = void 0;
+    this.links.clear();
+    this.requests.clear();
+    this.connections.clear();
+    this.cancelled.clear();
+    for (const link3 of links)
+      link3.closed(code, reason);
+  }
+  fail(reason) {
+    const socket = this.socket;
+    this.reset(4001, reason);
+    socket?.close(4001, reason);
+  }
+  close() {
+    this.disposed = true;
+    this.fail("Account control closed");
+  }
+};
+var HostControlSocket = class {
+  owner;
+  readyState = WebSocket.CONNECTING;
+  binaryType = "arraybuffer";
+  onopen = null;
+  onmessage = null;
+  onerror = null;
+  onclose = null;
+  helloSent = false;
+  requestId;
+  connectionId;
+  targetDeviceId;
+  constructor(owner) {
+    this.owner = owner;
+  }
+  get bufferedAmount() {
+    return this.owner.bufferedAmount;
+  }
+  opened() {
+    if (this.readyState !== WebSocket.CONNECTING)
+      return;
+    this.readyState = WebSocket.OPEN;
+    this.onopen?.call(this, new Event("open"));
+  }
+  deliver(data2) {
+    if (this.readyState === WebSocket.OPEN)
+      this.onmessage?.call(this, new MessageEvent("message", { data: data2 }));
+  }
+  closed(code, reason) {
+    if (this.readyState === WebSocket.CLOSED)
+      return;
+    this.readyState = WebSocket.CLOSED;
+    this.onclose?.call(this, { code, reason, wasClean: code === 1e3 });
+  }
+  send(data2) {
+    this.owner.send(this, data2);
+  }
+  detach() {
+    this.owner.release(this, false);
+    this.closed(1e3, "");
+  }
+  close(code = 1e3, reason = "") {
+    this.owner.release(this);
+    this.closed(code, reason);
+  }
+};
+
 // packages/webrtc/dist/rtc-adapter.js
 var RTC_DATA_CHANNEL_LABEL = "dsh";
 var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
@@ -68055,7 +68425,10 @@ var AdaptiveTransport = class extends BaseTransport {
     this.controlReady = false;
     this.socket = void 0;
     clearTimeout(this.recoveryOpeningTimer);
-    socket?.close();
+    if (socket?.detach)
+      socket.detach();
+    else
+      socket?.close();
     if (this.recoveryTimer !== void 0)
       return;
     const delay2 = recoveryDelayMs(this.recoveryAttempt, diagnostic);
@@ -78605,6 +78978,25 @@ var ClientConnection = class {
   constructor(context) {
     this.context = context;
   }
+  control;
+  controlToken;
+  previousControlToken;
+  closeAccountControl() {
+    this.control?.close();
+    this.control = void 0;
+    this.controlToken = void 0;
+    this.previousControlToken = void 0;
+  }
+  accountControl(identity3, token) {
+    if (!this.context.config.multiHost) return void 0;
+    this.control ??= new SharedControlConnection(websocketUrl(this.context.server.baseUrl));
+    if (this.controlToken !== token && token !== this.previousControlToken) {
+      if (this.controlToken) this.control.refreshAccessToken(identity3.deviceId, this.controlToken, token);
+      this.previousControlToken = this.controlToken;
+      this.controlToken = token;
+    }
+    return this.control;
+  }
   async connect(targetDeviceId, signal, options = {}) {
     signal?.throwIfAborted();
     const progressRunId = options.background ? -1 : this.context.connectionProgressRun + 1;
@@ -78634,6 +79026,7 @@ var ClientConnection = class {
       if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
       const credentials = await this.context.server.authenticate(identity3);
       signal?.throwIfAborted();
+      const control = this.accountControl(identity3, credentials.accessToken);
       const rtcFactory = this.context.config.forceRelay ? void 0 : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => void 0);
       if (!this.context.config.forceRelay && rtcFactory === void 0) {
         this.context.logger.warn("remote Harness WebRTC backend unavailable; using relay", {
@@ -78646,8 +79039,14 @@ var ClientConnection = class {
         {
           role: "client",
           deviceId: identity3.deviceId,
-          accessToken: credentials.accessToken,
-          refreshAccessToken: async () => (await this.context.server.authenticate(identity3)).accessToken,
+          accessToken: this.controlToken ?? credentials.accessToken,
+          ...control ? { controlSocketFactory: control.createHostSocket } : {},
+          refreshAccessToken: async () => {
+            const next = await this.context.server.authenticate(identity3);
+            signal?.throwIfAborted();
+            this.accountControl(identity3, next.accessToken);
+            return this.controlToken ?? next.accessToken;
+          },
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === "relay",
           preferredTransports: preferredTransportsForAttempt(attempt),
@@ -78855,6 +79254,85 @@ function canReconnect(error62) {
   ].includes(String(failure5.code))) return false;
   return failure5.retryable !== false;
 }
+
+// packages/plugin/src/client-hosts.ts
+var ClientHosts = class {
+  constructor(establish, config2, restored = () => {
+  }) {
+    this.establish = establish;
+    this.config = config2;
+    this.restored = restored;
+  }
+  hosts = /* @__PURE__ */ new Map();
+  async get(hostId, signal) {
+    signal?.throwIfAborted();
+    let link3 = this.hosts.get(hostId);
+    if (!link3) {
+      link3 = { lifetime: new AbortController(), reconnect: new ClientReconnect(this.config) };
+      this.hosts.set(hostId, link3);
+      this.connect(hostId, link3);
+    }
+    const work = link3.remote ? Promise.resolve(link3.remote) : link3.pending;
+    if (!work) throw link3.error ?? new ClientModeError("REMOTE_NOT_CONNECTED", "This Host is reconnecting.", true);
+    if (!signal) return work;
+    return new Promise((resolve10, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+      void work.then(resolve10, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  }
+  connect(hostId, link3, retry = false) {
+    const work = this.establish(hostId, link3.lifetime.signal).then(async (remote) => {
+      if (link3.lifetime.signal.aborted || this.hosts.get(hostId) !== link3) {
+        await remote.client.close();
+        throw new ClientModeError("CANCELLED", "This Host connection was released.");
+      }
+      link3.remote = remote;
+      link3.error = void 0;
+      remote.client.onClose((error62) => {
+        if (link3.remote !== remote || link3.lifetime.signal.aborted) return;
+        link3.remote = void 0;
+        link3.error = error62;
+        if (!canReconnect(error62)) {
+          this.hosts.delete(hostId);
+          link3.lifetime.abort(error62);
+          return;
+        }
+        link3.reconnect.start(async () => {
+          await this.connect(hostId, link3, true);
+        }, error62);
+      });
+      if (retry) this.restored(remote);
+      return remote;
+    });
+    link3.pending = work;
+    void work.then(() => {
+      if (link3.pending === work) link3.pending = void 0;
+    }, (error62) => {
+      if (link3.pending === work) link3.pending = void 0;
+      link3.error = error62;
+      if ((!retry || !canReconnect(error62)) && this.hosts.get(hostId) === link3) {
+        this.hosts.delete(hostId);
+        link3.lifetime.abort(error62);
+      }
+    });
+    return work;
+  }
+  async release(hostId) {
+    const link3 = this.hosts.get(hostId);
+    if (!link3) return;
+    this.hosts.delete(hostId);
+    link3.reconnect.cancel();
+    link3.lifetime.abort(new ClientModeError("CANCELLED", "This Host connection was released."));
+    await link3.remote?.client.close();
+    await link3.pending?.catch(() => void 0);
+  }
+  async close() {
+    const results = await Promise.allSettled([...this.hosts.keys()].map((id6) => this.release(id6)));
+    const failure5 = results.find((result) => result.status === "rejected");
+    if (failure5?.status === "rejected") throw failure5.reason;
+  }
+};
 
 // packages/plugin/src/loopback-preview.ts
 import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
@@ -83261,7 +83739,7 @@ var RemoteTypertGateway2 = class {
       try {
         response = await this.client.rpc("harness.remote.call", request, signal);
       } catch (error62) {
-        if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE")) throw error62;
+        if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE") || !canRepeatAfterOversizedResponse(endpoint)) throw error62;
         response = await this.callTransferred(encoded, signal);
       }
     }
@@ -83764,7 +84242,7 @@ function base64ToBytes2(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult(endpoint, value) {
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
+  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render" && !NATIVE_SOURCE_BINARY_RESULTS.includes(endpoint)) return value;
   if (!isRecord9(value) || typeof value.data !== "string") return value;
   return { ...value, data: base64ToBytes2(value.data) };
 }
@@ -85492,6 +85970,7 @@ var entryConfigSchema = Schema.object({
   hostControl: Schema.object({ enabled: Schema.boolean() }),
   loopback: Schema.object({ ports: Schema.array(Schema.number()) }),
   forceRelay: Schema.boolean(),
+  multiHost: Schema.boolean(),
   rotatePinnedPeerKey: Schema.boolean(),
   logLevel: Schema.union(["debug", "info", "warn", "error"]),
   reconnect: Schema.union([
@@ -85537,6 +86016,7 @@ var configSchema = external_exports.object({
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
+  multiHost: external_exports.boolean().optional(),
   rotatePinnedPeerKey: external_exports.boolean().optional(),
   logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
   reconnect: reconnectSchema.optional(),
@@ -85581,6 +86061,7 @@ function resolveConfig(input4 = {}, env = process.env) {
     sidebar: { entry: parsed.sidebar?.entry === "compact" ? "compact" : "standard" },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
+    multiHost: parsed.multiHost ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
     logLevel: parsed.logLevel ?? "info",
     reconnect: {
@@ -86368,7 +86849,12 @@ function requireRecord(value, name2) {
 
 // packages/plugin/src/terminal-carrier-compat.ts
 var identity2 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
-var attachmentArgs = external_exports.object({ agentId: identity2, id: identity2, attachmentId: identity2 }).strict();
+var targetArgs = {
+  terminal: external_exports.object({ agentId: identity2, id: identity2 }).strict(),
+  sourceTerminal: external_exports.object({ sessionId: external_exports.string().min(1).max(2048).refine((value) => !value.includes("\0")), id: identity2 }).strict()
+};
+var attachmentArgs = (namespace) => targetArgs[namespace].extend({ attachmentId: identity2 });
+var attachmentKey = (args) => JSON.stringify(["sessionId" in args ? args.sessionId : args.agentId, args.id]);
 var dimensions = { cols: external_exports.number().int().min(1).max(1e3), rows: external_exports.number().int().min(1).max(1e3) };
 var input2 = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("write"), sequence: external_exports.number().int().positive().safe(), data: external_exports.string().max(64 * 1024) }).strict(),
@@ -86425,14 +86911,15 @@ var Queue = class {
   }
 };
 var TerminalCarrierCompat = class {
-  constructor(gateway) {
+  constructor(gateway, namespace = "terminal") {
     this.gateway = gateway;
+    this.namespace = namespace;
   }
   attachments = /* @__PURE__ */ new Map();
   async open(payload, signal) {
     signal.throwIfAborted();
-    const args = attachmentArgs.parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
-    const key = `${args.agentId}/${args.id}`;
+    const args = attachmentArgs(this.namespace).parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
+    const key = attachmentKey(args);
     this.attachments.get(key)?.control.abort();
     const control = new AbortController();
     const queue = new Queue();
@@ -86449,7 +86936,8 @@ var TerminalCarrierCompat = class {
     this.attachments.set(key, entry);
     let source;
     try {
-      source = await this.gateway.open("terminal/attach", { args: { agentId: args.agentId, id: args.id } }, lifetime, queue);
+      const { attachmentId: _attachment, ...target3 } = args;
+      source = await this.gateway.open(`${this.namespace}/attach`, { args: target3 }, lifetime, queue);
     } catch (error62) {
       control.abort();
       throw error62;
@@ -86476,15 +86964,17 @@ var TerminalCarrierCompat = class {
     })();
   }
   async call(endpoint, payload, signal) {
-    const fields = endpoint === "terminal/write" ? { data: external_exports.string().max(64 * 1024) } : dimensions;
-    const args = attachmentArgs.extend(fields).parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
-    const entry = this.attachments.get(`${args.agentId}/${args.id}`);
+    const write3 = endpoint === `${this.namespace}/write`;
+    if (!write3 && endpoint !== `${this.namespace}/resize`) throw new RpcError("METHOD_NOT_ALLOWED", "Unsupported terminal input.");
+    const fields = write3 ? { data: external_exports.string().max(64 * 1024) } : dimensions;
+    const args = attachmentArgs(this.namespace).extend(fields).parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
+    const entry = this.attachments.get(attachmentKey(args));
     if (!entry || entry.args.attachmentId !== args.attachmentId || !entry.writable) throw new RpcError("PERMISSION_DENIED", "This terminal input attachment is not writable.");
     if (entry.pending.size >= 32) throw new RpcError("RATE_LIMITED", "Too many unacknowledged terminal inputs.");
     signal.throwIfAborted();
     const sequence2 = ++entry.sequence;
     const value = input2.parse({
-      type: endpoint === "terminal/write" ? "write" : "resize",
+      type: write3 ? "write" : "resize",
       sequence: sequence2,
       ..."data" in args ? { data: args.data } : { cols: args.cols, rows: args.rows }
     });
@@ -86507,8 +86997,8 @@ var TerminalCarrierCompat = class {
     }
   }
 };
-async function openRemoteTerminal(target3, payload, signal, uplink) {
-  const args = external_exports.object({ agentId: identity2, id: identity2 }).strict().parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
+async function openRemoteTerminal(target3, payload, signal, uplink, namespace = "terminal") {
+  const args = targetArgs[namespace].parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
   const attachmentId = uuidV7();
   const control = new AbortController();
   const lifetime = AbortSignal.any([signal, control.signal]);
@@ -86523,7 +87013,7 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
   lifetime.throwIfAborted();
   let source;
   try {
-    source = await target3.open("terminal/follow", { args: { ...args, attachmentId } }, lifetime);
+    source = await target3.open(`${namespace}/follow`, { args: { ...args, attachmentId } }, lifetime);
   } catch (error62) {
     control.abort();
     throw error62;
@@ -86563,7 +87053,7 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
           output2.push({ type: "ack", sequence: sequence2, refusal: "read-only" });
           continue;
         }
-        const result = await target3.dispatch(`terminal/${value.type}`, { args: {
+        const result = await target3.dispatch(`${namespace}/${value.type}`, { args: {
           ...args,
           attachmentId,
           ...value.type === "write" ? { data: value.data } : { cols: value.cols, rows: value.rows }
@@ -86732,7 +87222,7 @@ var TypertGatewaySwitch = class {
     this.installed = false;
   }
   openRemote(endpoint, payload, signal, uplink) {
-    return endpoint === "terminal/attach" ? openRemoteTerminal(this.remoteTarget, payload, signal, uplink ?? endedUplink()) : this.remoteTarget.open(endpoint, payload, signal);
+    return endpoint === "terminal/attach" ? openRemoteTerminal(this.remoteTarget, payload, signal, uplink ?? endedUplink()) : endpoint === "sourceTerminal/attach" ? openRemoteTerminal(this.remoteTarget, payload, signal, uplink ?? endedUplink(), "sourceTerminal") : this.remoteTarget.open(endpoint, payload, signal);
   }
   selectInvoke(request) {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
@@ -87942,6 +88432,19 @@ var ClientModeRuntime = class {
         return owner.identities;
       }
     });
+    if (config2.multiHost) {
+      this.hostConnections = new ClientHosts(async (hostId, signal) => {
+        const remote = await this.connection.connect(hostId, signal, { background: true });
+        remote.client.onClose((error62) => this.handleRemoteClose(remote, error62));
+        return remote;
+      }, config2.reconnect, (remote) => {
+        if (!this.closed && remote.features.remoteGateway && this.recoverable?.target.deviceId === remote.target.deviceId && this.gatewaySwitch.status().mode === "remote") {
+          this.connected = remote;
+          this.selectRemoteTarget(remote);
+          this.recoveryGeneration++;
+        }
+      });
+    }
     this.control = new ClientControl({
       detailedStatus: (...args) => owner.detailedStatus(...args),
       devices: (...args) => owner.devices(...args),
@@ -87994,6 +88497,9 @@ var ClientModeRuntime = class {
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
   }
   async connect(targetDeviceId, signal) {
+    signal?.throwIfAborted();
+    if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
+    if (this.hostConnections) return this.hostConnections.get(targetDeviceId, signal);
     const lifetime = this.remoteLifetime.signal;
     const connectionSignal = signal === void 0 ? lifetime : AbortSignal.any([lifetime, signal]);
     connectionSignal.throwIfAborted();
@@ -88018,6 +88524,7 @@ var ClientModeRuntime = class {
     return this.control.handleControl(endpoint, payload, signal);
   }
   connection;
+  hostConnections;
   control;
   codexStreamBridge;
   preview;
@@ -88284,7 +88791,7 @@ var ClientModeRuntime = class {
   }
   async setMode(mode2, targetDeviceId, signal) {
     if (mode2 === "local") {
-      await this.leaveRemote();
+      await this.leaveRemote(!this.hostConnections);
       this.logger.info("Harness target switched", { mode: "local" });
       return this.status();
     }
@@ -88298,13 +88805,13 @@ var ClientModeRuntime = class {
       this.assertRemoteCompatible(next);
     } catch (error62) {
       this.connection.clearConnectionProgress(next.progressRunId);
-      await next.client.close().catch(() => void 0);
+      if (!this.hostConnections) await next.client.close().catch(() => void 0);
       throw error62;
     }
     const previous = this.connected;
     await this.closePreview();
     if (signal.aborted || lifetime.aborted || this.closed) {
-      await next.client.close().catch(() => void 0);
+      if (!this.hostConnections) await next.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
     }
     this.connected = next;
@@ -88316,7 +88823,7 @@ var ClientModeRuntime = class {
     this.assertRemoteCurrent(next, signal);
     this.selectRemoteTarget(next);
     await this.codexStreamBridge.closeCodexStreams(previous?.client);
-    await previous?.client.close().catch(() => void 0);
+    if (!this.hostConnections && previous !== next) await previous?.client.close().catch(() => void 0);
     this.logger.info("Harness target switched", { mode: "remote", targetDeviceId: shortId(next.target.deviceId) });
     return this.status();
   }
@@ -88376,6 +88883,7 @@ var ClientModeRuntime = class {
     this.assertHostAuthorizationForDeviceDiscovery();
     if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
     const activeSignal = AbortSignal.any([signal, this.remoteLifetime.signal]);
+    if (this.hostConnections) return query(await this.hostConnections.get(targetDeviceId, activeSignal), activeSignal);
     const shared = this.connected;
     if (shared?.target.deviceId === targetDeviceId) {
       this.assertRemoteCurrent(shared, activeSignal);
@@ -88630,7 +89138,7 @@ var ClientModeRuntime = class {
       this.gatewaySwitch.restore();
     }
   }
-  async leaveRemote() {
+  async leaveRemote(closeHosts = true) {
     this.clientAuthRequired = false;
     this.beginSelection();
     this.sessionTools.invalidate();
@@ -88646,8 +89154,10 @@ var ClientModeRuntime = class {
       this.closeCursorVirtual(),
       this.closePreview(),
       this.codexStreamBridge.closeCodexStreams(previous?.client),
-      previous?.client.close()
+      closeHosts ? previous?.client.close() : void 0,
+      closeHosts ? this.hostConnections?.close() : void 0
     ]);
+    if (closeHosts) this.connection.closeAccountControl();
     const failure5 = results.find((result) => result.status === "rejected");
     if (failure5?.status === "rejected") throw failure5.reason;
   }
@@ -88678,6 +89188,28 @@ var ClientModeRuntime = class {
   }
   activeRemote() {
     return this.connected;
+  }
+  /** Source/session owners retain this gateway. UI selection cannot retarget
+   * any request; transient reconnect replaces only this Host's connection. */
+  gatewayForHost(hostId) {
+    if (!this.hostConnections) throw new ClientModeError("FEATURE_NOT_SUPPORTED", "Multi-host mode is not enabled.");
+    const current = async (signal) => {
+      if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
+      this.assertHostAuthorizationForDeviceDiscovery();
+      const remote = await this.hostConnections.get(hostId, signal);
+      this.assertHostAuthorizationForDeviceDiscovery();
+      return this.remoteTypertGateway(remote);
+    };
+    return {
+      invoke: async (request) => (await current(request.signal)).invoke(request),
+      dispatch: async (endpoint, payload, signal) => (await current(signal)).dispatch(endpoint, payload, signal),
+      open: async (endpoint, payload, signal) => (await current(signal)).open(endpoint, payload, signal)
+    };
+  }
+  async disconnectHost(hostId) {
+    if (!this.hostConnections) throw new ClientModeError("FEATURE_NOT_SUPPORTED", "Multi-host mode is not enabled.");
+    if (this.recoverable?.target.deviceId === hostId) this.recoverable = void 0;
+    await this.hostConnections.release(hostId);
   }
   selectRemoteTarget(remote) {
     this.assertRemoteCompatible(remote);
@@ -88865,13 +89397,13 @@ var ClientModeRuntime = class {
       assertCurrent();
     } catch (error62) {
       this.connection.clearConnectionProgress(next.progressRunId);
-      await next.client.close().catch(() => void 0);
+      if (!this.hostConnections) await next.client.close().catch(() => void 0);
       throw error62;
     }
     const previous = this.connected;
     this.connected = next;
     this.connection.clearConnectionProgress(next.progressRunId);
-    await previous?.client.close().catch(() => void 0);
+    if (!this.hostConnections && previous !== next) await previous?.client.close().catch(() => void 0);
     return next;
   }
   assertRemoteCurrent(remote, signal) {
@@ -88895,7 +89427,7 @@ var ClientModeRuntime = class {
   handleRemoteClose(remote, error62) {
     if (this.connected !== remote) return;
     const recover = this.recoverable === remote;
-    this.recoverable = void 0;
+    if (!this.hostConnections) this.recoverable = void 0;
     this.connected = void 0;
     this.connectionProgress = void 0;
     this.pendingWorkspaceSelection = void 0;
@@ -88910,6 +89442,7 @@ var ClientModeRuntime = class {
     this.logger.warn("remote Harness transport closed", { targetDeviceId: shortId(remote.target.deviceId) });
     if (!this.closed && this.gatewaySwitch.status().mode === "remote") this.noteClientAuthFailure(error62);
     if (!recover || this.closed) return;
+    if (this.hostConnections) return;
     this.reconnect.start(async (signal) => {
       await cleanup;
       signal.throwIfAborted();
@@ -93926,11 +94459,14 @@ var TerminalPolicy = class _TerminalPolicy {
     owners.delete(key);
     _TerminalPolicy.claims.get(owners)?.delete(key);
   }
-  check(endpoint, payload) {
+  assertEnabled() {
     if (!(typeof this.enabled === "function" ? this.enabled() : this.enabled)) throw new RpcError(
       "TERMINAL_DISABLED",
       "Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / \u8FDC\u7A0B\u7EC8\u7AEF\u672A\u5F00\u542F\uFF0C\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002"
     );
+  }
+  check(endpoint, payload) {
+    this.assertEnabled();
     for (const [key2, attachment] of this.attachments) if (this.owners.get(key2) !== this.deviceId || this.claims.get(key2) !== attachment.claim) this.attachments.delete(key2);
     const args = external_exports.object({ args: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict().parse(payload).args;
     const rawSessionId = args.agentId ?? args.sessionId;
@@ -102439,6 +102975,8 @@ var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var HARNESS_REMOTE_ALLOWLIST = [
+  ...NATIVE_SOURCE_CALLS,
+  ...NATIVE_SOURCE_STREAMS,
   "$events",
   "$events/result",
   "agentPresets/list",
@@ -102596,6 +103134,7 @@ var HarnessRemoteBridge = class {
     this.schedule = schedule;
     this.uploadAttachment = uploadAttachment;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
+    this.sourceTerminalCarrier = new TerminalCarrierCompat(gateway, "sourceTerminal");
   }
   compactHistoryEnabled = false;
   streams = /* @__PURE__ */ new Map();
@@ -102603,6 +103142,7 @@ var HarnessRemoteBridge = class {
   outgoingTransfers = /* @__PURE__ */ new Map();
   warnedMissingRemoteEvents = false;
   terminalCarrier;
+  sourceTerminalCarrier;
   async call(input4) {
     const params = callSchema3.parse(input4);
     if ((params.endpoint === "remoteUploads/upload" || params.endpoint === "remoteImages/upload") && this.uploadAttachment !== void 0) {
@@ -102610,6 +103150,8 @@ var HarnessRemoteBridge = class {
       return { ok: true, value: await this.uploadAttachment(payload.args) };
     }
     this.assertAllowed(params.endpoint);
+    if (params.endpoint.startsWith("sourceTerminal/")) this.terminal.assertEnabled();
+    if (NATIVE_SOURCE_STREAMS.includes(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this source endpoint.");
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
       const args = requestArgs(params.payload);
@@ -102650,7 +103192,7 @@ var HarnessRemoteBridge = class {
       if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : params.endpoint === "sourceTerminal/write" || params.endpoint === "sourceTerminal/resize" ? await this.sourceTerminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : filterRemotePluginInventory(params.endpoint, nativeResult);
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -102839,6 +103381,8 @@ var HarnessRemoteBridge = class {
   async openStream(input4) {
     const params = streamOpenSchema3.parse(input4);
     this.assertAllowed(params.endpoint);
+    if (params.endpoint.startsWith("sourceTerminal/")) this.terminal.assertEnabled();
+    if (NATIVE_SOURCE_CALLS.includes(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This source endpoint is not a stream.");
     if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
@@ -102851,7 +103395,7 @@ var HarnessRemoteBridge = class {
     this.streams.set(params.streamId, { controller });
     let source;
     try {
-      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await (params.endpoint === "terminal/follow" && this.terminalCarrier !== void 0 ? this.terminalCarrier.open(params.payload, controller.signal) : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal));
+      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await (params.endpoint === "terminal/follow" && this.terminalCarrier !== void 0 ? this.terminalCarrier.open(params.payload, controller.signal) : params.endpoint === "sourceTerminal/follow" ? this.sourceTerminalCarrier.open(params.payload, controller.signal) : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal));
       controller.signal.throwIfAborted();
     } catch (error62) {
       this.streams.delete(params.streamId);
@@ -103401,7 +103945,7 @@ function decodeCanonicalBase643(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult2(endpoint, result) {
-  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render" && !NATIVE_SOURCE_BINARY_RESULTS.includes(endpoint)) return result;
   if (!isJsonRecord(result.value)) return result;
   const directBytes = isBinary(result.value.data) ? result.value.data : void 0;
   const attachmentBytes = directBytes === void 0 ? attachmentAt(result, ["data"]) : void 0;

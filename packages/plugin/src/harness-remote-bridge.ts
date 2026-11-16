@@ -24,6 +24,7 @@ import {
   MAX_HARNESS_API_TRANSFER_BYTES,
   MAX_SECURE_MESSAGE_BYTES,
   TRANSFER_IDLE_MS,
+  NATIVE_SOURCE_CALLS, NATIVE_SOURCE_STREAMS, NATIVE_SOURCE_BINARY_RESULTS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import { TerminalPolicy, TERMINAL_CALLS, TERMINAL_STREAMS } from './terminal-policy.js'
@@ -112,6 +113,8 @@ const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Fixed v0.1.2 Typert Remote subset exposed to authenticated peers. */
 export const HARNESS_REMOTE_ALLOWLIST = [
+  ...NATIVE_SOURCE_CALLS,
+  ...NATIVE_SOURCE_STREAMS,
   '$events',
   '$events/result',
   'agentPresets/list',
@@ -295,6 +298,7 @@ export class HarnessRemoteBridge {
   private warnedMissingRemoteEvents = false
 
   private readonly terminalCarrier: TerminalCarrierCompat | undefined
+  private readonly sourceTerminalCarrier: TerminalCarrierCompat
 
   constructor(
     private readonly gateway: LocalTypertGateway,
@@ -308,6 +312,7 @@ export class HarnessRemoteBridge {
     private readonly uploadAttachment?: (body: unknown) => Promise<unknown>,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
+    this.sourceTerminalCarrier = new TerminalCarrierCompat(gateway, 'sourceTerminal')
   }
 
   async call(input: unknown): Promise<TypertRpcResult> {
@@ -317,6 +322,8 @@ export class HarnessRemoteBridge {
       return { ok: true, value: await this.uploadAttachment(payload.args) }
     }
     this.assertAllowed(params.endpoint)
+    if (params.endpoint.startsWith('sourceTerminal/')) this.terminal.assertEnabled()
+    if ((NATIVE_SOURCE_STREAMS as readonly string[]).includes(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this source endpoint.')
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
       const args = requestArgs(params.payload)
@@ -362,6 +369,8 @@ export class HarnessRemoteBridge {
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
         : this.terminalCarrier !== undefined && (params.endpoint === 'terminal/write' || params.endpoint === 'terminal/resize')
           ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal)
+          : params.endpoint === 'sourceTerminal/write' || params.endpoint === 'sourceTerminal/resize'
+            ? await this.sourceTerminalCarrier.call(params.endpoint, nativePayload, signal)
           : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
@@ -567,6 +576,8 @@ export class HarnessRemoteBridge {
   async openStream(input: unknown): Promise<{ opened: true; streamId: string }> {
     const params = streamOpenSchema.parse(input) as HarnessRemoteStreamOpenParams
     this.assertAllowed(params.endpoint)
+    if (params.endpoint.startsWith('sourceTerminal/')) this.terminal.assertEnabled()
+    if ((NATIVE_SOURCE_CALLS as readonly string[]).includes(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This source endpoint is not a stream.')
     if (params.endpoint.startsWith('pluginManager/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Plugin management endpoints are not streams.')
     if (params.endpoint.startsWith('settings/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Settings endpoints are not streams.')
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
@@ -582,6 +593,8 @@ export class HarnessRemoteBridge {
       source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
         ?? await (params.endpoint === 'terminal/follow' && this.terminalCarrier !== undefined
           ? this.terminalCarrier.open(params.payload, controller.signal)
+          : params.endpoint === 'sourceTerminal/follow'
+            ? this.sourceTerminalCarrier.open(params.payload, controller.signal)
           : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal))
       controller.signal.throwIfAborted()
     } catch (error) {
@@ -1267,7 +1280,7 @@ function decodeCanonicalBase64(value: string): Uint8Array {
 }
 
 function normalizeWorkspaceBinaryResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
-  if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render')) return result
+  if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render' && !(NATIVE_SOURCE_BINARY_RESULTS as readonly string[]).includes(endpoint))) return result
   if (!isJsonRecord(result.value)) return result
   const directBytes = isBinary(result.value.data) ? result.value.data : undefined
   const attachmentBytes = directBytes === undefined ? attachmentAt(result, ['data']) : undefined

@@ -4,6 +4,7 @@ import {
   MAX_REMOTE_CAPABILITY_ENTRIES,
   REMOTE_SESSION_EVENTS_CAPABILITY,
   parseRemoteWorkspaceTypes,
+  canRepeatAfterOversizedResponse, NATIVE_SOURCE_BINARY_RESULTS,
   type EventPayload,
   type HarnessRemoteFrameData,
   type HarnessRemoteStreamClosedData,
@@ -222,7 +223,7 @@ export class RemoteTypertGateway {
       try {
         response = await this.client.rpc<unknown>('harness.remote.call', request, activeSignal, options)
       } catch (error) {
-        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE')) throw error
+        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canRepeatAfterOversizedResponse(endpoint)) throw error
         response = await this.callTransferred(encoded, activeSignal, options)
       }
     }
@@ -553,7 +554,7 @@ function parseRpcResult<T>(value: unknown): RemoteGatewayResult<T> {
 
 /** Restore bounded native workspace binary fields after the JSON-only Remote carrier. */
 function normalizeWorkspaceBinaryResult<T>(endpoint: string, value: T | undefined): T | undefined {
-  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render' && !(NATIVE_SOURCE_BINARY_RESULTS as readonly string[]).includes(endpoint)) return value
   if (!isRecord(value) || typeof value.data !== 'string') return value
   return { ...value, data: base64ToBytes(value.data) } as T
 }

@@ -2,6 +2,7 @@ import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
+import * as antigravityHistory from '../src/acp/adapters/antigravity/transcript-loader.js'
 import { resolveConfig } from '../src/config.js'
 import type { CursorAcpInbound, CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
 import type { SafeLogger } from '../src/logging.js'
@@ -749,6 +750,9 @@ describe('AcpRemoteGateway', () => {
   }, 20000)
 
   it('prewarms only a validated selected AGY directory while listing history', async () => {
+    // Prewarming is independent of the user's real AGY history directory.
+    // Loader integrity and empty/missing history are covered by its own tests.
+    const history = vi.spyOn(antigravityHistory, 'discoverAntigravitySessions').mockResolvedValue([])
     const acp = readyAcp()
     acp.prewarmSession = vi.fn()
     const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: [] }, { id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] }, silentLogger(), () => acp)
@@ -765,7 +769,12 @@ describe('AcpRemoteGateway', () => {
       await list(process.cwd(), 'cursor')
       await expect(list('/nonexistent-agy-prewarm-directory')).rejects.toMatchObject({ code: 'CURSOR_PATH_NOT_ALLOWED' })
       expect(acp.prewarmSession).toHaveBeenCalledTimes(1)
+      history.mockRejectedValueOnce(Object.assign(new Error('History index is unavailable'), { code: 'HISTORY_UNAVAILABLE' }))
+      await expect(gateway.call('warm-connection', { method: 'dsh/sessionList', params: {
+        path: process.cwd(), backend: 'antigravity', prewarm: false,
+      } })).rejects.toMatchObject({ code: 'HISTORY_UNAVAILABLE' })
     } finally {
+      history.mockRestore()
       await gateway.close()
     }
   })

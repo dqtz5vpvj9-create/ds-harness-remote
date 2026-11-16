@@ -1,6 +1,6 @@
 import { RemoteClientCore } from '@dsh-remote/client-core'
 import type { RtcPeerConnectionFactory } from '@dsh-remote/webrtc'
-import { AdaptiveTransport } from '@dsh-remote/webrtc'
+import { AdaptiveTransport, SharedControlConnection } from '@dsh-remote/webrtc'
 import { probeRemoteHostFeatures } from './client-capabilities.js'
 import type {
   ConnectedRemote,
@@ -43,6 +43,28 @@ export interface ClientConnectionContext {
 export class ClientConnection {
   constructor(private readonly context: ClientConnectionContext) {}
 
+  private control?: SharedControlConnection
+  private controlToken?: string
+  private previousControlToken?: string
+
+  closeAccountControl(): void {
+    this.control?.close()
+    this.control = undefined
+    this.controlToken = undefined
+    this.previousControlToken = undefined
+  }
+
+  private accountControl(identity: HostIdentity, token: string): SharedControlConnection | undefined {
+    if (!this.context.config.multiHost) return undefined
+    this.control ??= new SharedControlConnection(websocketUrl(this.context.server.baseUrl))
+    if (this.controlToken !== token && token !== this.previousControlToken) {
+      if (this.controlToken) this.control.refreshAccessToken(identity.deviceId, this.controlToken, token)
+      this.previousControlToken = this.controlToken
+      this.controlToken = token
+    }
+    return this.control
+  }
+
   async connect(targetDeviceId: string, signal?: AbortSignal, options: { background?: boolean } = {}): Promise<ConnectedRemote> {
     signal?.throwIfAborted()
     const progressRunId = options.background ? -1 : this.context.connectionProgressRun + 1
@@ -72,6 +94,7 @@ export class ClientConnection {
       if (!presence.online) throw new ClientModeError('HOST_OFFLINE', 'The selected Host is offline.', true)
       const credentials = await this.context.server.authenticate(identity)
       signal?.throwIfAborted()
+      const control = this.accountControl(identity, credentials.accessToken)
       const rtcFactory = this.context.config.forceRelay
         ? undefined
         : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => undefined)
@@ -86,8 +109,14 @@ export class ClientConnection {
         {
           role: 'client',
           deviceId: identity.deviceId,
-          accessToken: credentials.accessToken,
-          refreshAccessToken: async () => (await this.context.server.authenticate(identity)).accessToken,
+          accessToken: this.controlToken ?? credentials.accessToken,
+          ...(control ? { controlSocketFactory: control.createHostSocket } : {}),
+          refreshAccessToken: async () => {
+            const next = await this.context.server.authenticate(identity)
+            signal?.throwIfAborted()
+            this.accountControl(identity, next.accessToken)
+            return this.controlToken ?? next.accessToken
+          },
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === 'relay',
           preferredTransports: preferredTransportsForAttempt(attempt),

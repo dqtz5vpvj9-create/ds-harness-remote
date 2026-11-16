@@ -39,6 +39,16 @@ const cleanupContract1 = () => {
 afterEach(cleanupContract1)
 
 describe('RemoteClientCore', () => {
+  it('never repeats a mutation after an oversized response or a lost reply', async () => {
+    for (const endpoint of ['session/prompt', 'session/create', 'settings/update', 'userQuestions/answer', 'hhpi/operate', 'hhpi/nativeCall', 'hhpi/nativeReply', 'sourceWorkspace/save', 'sourceWorkspace/finishUpload']) {
+      for (const code of ['RESPONSE_TOO_LARGE', 'TRANSPORT_CLOSED']) {
+        const rpc = vi.fn(async () => { throw Object.assign(new Error('Result not received'), { code }) })
+        const gateway = new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore)
+        await expect(gateway.call(endpoint, { args: { operationId: 'stable' } })).rejects.toMatchObject({ code })
+        expect(rpc).toHaveBeenCalledOnce()
+      }
+    }
+  })
   it('preserves terminal close reasons for recovery and notifies only once', async () => {
     const transport = new LoopbackTransport()
     const client = new RemoteClientCore(transport)

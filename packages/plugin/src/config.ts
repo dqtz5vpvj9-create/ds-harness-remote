@@ -19,6 +19,8 @@ export interface Config {
   hostControl?: { enabled?: boolean }
   loopback?: { ports?: number[] }
   forceRelay?: boolean
+  /** Requires a self-hosted Server with remote.multi-host.v1. */
+  multiHost?: boolean
   /**
    * When a known peer device presents a NEW identity key after re-authorizing with the
    * same account membership (e.g. the peer reinstalled the Harness), rotate the pinned
@@ -75,6 +77,7 @@ export interface ResolvedConfig {
   httpServerAllowlist: string[]
   deviceName: string
   forceRelay: boolean
+  multiHost?: boolean
   rotatePinnedPeerKey: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   reconnect: {
@@ -119,6 +122,7 @@ export const entryConfigSchema = s.object({
   hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
+  multiHost: s.boolean(),
   rotatePinnedPeerKey: s.boolean(),
   logLevel: s.union(['debug', 'info', 'warn', 'error'] as const),
   reconnect: s.union([
@@ -176,6 +180,7 @@ const configSchema = z.object({
   hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   loopback: z.object({ ports: z.array(z.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: z.boolean().optional(),
+  multiHost: z.boolean().optional(),
   rotatePinnedPeerKey: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   reconnect: reconnectSchema.optional(),
@@ -224,6 +229,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     sidebar: { entry: parsed.sidebar?.entry === 'compact' ? 'compact' : 'standard' },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
+    multiHost: parsed.multiHost ?? false,
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
     logLevel: parsed.logLevel ?? 'info',
     reconnect: {

@@ -2221,3 +2221,39 @@ different Host. A client negotiating `remote.multi-host.v1` may release just one
 link using `connection.lease.close { connectionId }`; this does not close its
 account control socket or any other Host link. Account authorization failures
 remain account-wide. Legacy clients keep the existing single-host behavior.
+
+### Source-owned native services in the HHPI fork
+
+The fork carries `hhpi/*`, `sourceWorkspace/*`, `sourceNavigation/*` and
+`sourceTerminal/*` over the existing encrypted `harness.remote.*` transport.
+The exact unary/stream sets are exported by `packages/protocol/src/native-sources.ts`.
+Routing permission does not advertise a service as installed: the source
+Gateway still validates its schemas, current principal, method and resource
+grants. Unsupported methods return their native error; they do not fall through
+to a central Agent or filesystem. `hhpi/nativeCall` retains its method-level
+authorization in the source runtime.
+
+History uses the source's canonical identity, epoch, version, cursors and reset
+markers unchanged. Native pages never use the legacy compact-history transform.
+Binary source file results use the same bounded base64/transfer representation
+as official workspace files. A response-size failure occurs after dispatch;
+only explicitly enumerated reads may repeat using transfer framing. Writes,
+native calls and terminal input never repeat automatically. For uncertain
+writes query `hhpi/receipt` or `hhpi/nativeReceipt` with the original operation
+identity. A connection close is not a user rejection or an empty-history result.
+
+Source terminals reuse the existing terminal compatibility adapter:
+`sourceTerminal/follow { sessionId, id, attachmentId }` opens the source's
+official `sourceTerminal/attach` duplex stream. `write` and `resize` carry the
+same target and attachment ID; they complete only after a native input ack.
+The Host terminal enablement gate applies, and the source continues checking
+its actual terminal resource grants. Closing a carrier discards pending input
+and releases the attachment without closing the native PTY. Direct wire
+`sourceTerminal/attach` is not exposed as a read-only stream.
+
+With `multiHost: true`, the plugin's `dshRemoteClient.gatewayForHost(hostId)`
+provides a stable Host-bound gateway. Opening another Host or selecting the
+local UI retains other Host links; `disconnectHost` releases only its target.
+Logout/disposal closes all links and the shared account control connection.
+This is a transport/service integration point; it does not itself migrate an
+HHPI source, replace its execution owner, or declare Web/Go acceptance.

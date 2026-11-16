@@ -25,9 +25,13 @@ export class TerminalPolicy {
     TerminalPolicy.claims.get(owners)?.delete(key)
   }
 
-  check(endpoint: string, payload: unknown): { key?: string; created?: boolean; claim?: object } {
+  assertEnabled(): void {
     if (!(typeof this.enabled === 'function' ? this.enabled() : this.enabled)) throw new RpcError('TERMINAL_DISABLED',
       'Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / 远程终端未开启，请在 Host 的 Remote 设置中开启「远程终端」，开关切换后立即保存并生效。')
+  }
+
+  check(endpoint: string, payload: unknown): { key?: string; created?: boolean; claim?: object } {
+    this.assertEnabled()
     for (const [key, attachment] of this.attachments) if (this.owners.get(key) !== this.deviceId || this.claims.get(key) !== attachment.claim) this.attachments.delete(key)
     const args = z.object({ args: z.record(z.string(), z.unknown()) }).strict().parse(payload).args
     const rawSessionId = args.agentId ?? args.sessionId

@@ -4,7 +4,14 @@ import { RpcError } from './safe-error.js'
 import { uuidV7 } from './ids.js'
 
 const identity = z.string().regex(/^[A-Za-z0-9_:-]{1,256}$/)
-const attachmentArgs = z.object({ agentId: identity, id: identity, attachmentId: identity }).strict()
+type TerminalNamespace = 'terminal' | 'sourceTerminal'
+const targetArgs = {
+  terminal: z.object({ agentId: identity, id: identity }).strict(),
+  sourceTerminal: z.object({ sessionId: z.string().min(1).max(2048).refine(value => !value.includes('\0')), id: identity }).strict(),
+}
+const attachmentArgs = (namespace: TerminalNamespace) => targetArgs[namespace].extend({ attachmentId: identity })
+type AttachmentArgs = z.infer<ReturnType<typeof attachmentArgs>>
+const attachmentKey = (args: AttachmentArgs) => JSON.stringify(['sessionId' in args ? args.sessionId : args.agentId, args.id])
 const dimensions = { cols: z.number().int().min(1).max(1000), rows: z.number().int().min(1).max(1000) }
 const input = z.discriminatedUnion('type', [
   z.object({ type: z.literal('write'), sequence: z.number().int().positive().safe(), data: z.string().max(64 * 1024) }).strict(),
@@ -54,7 +61,7 @@ class Queue implements AsyncIterable<unknown> {
 }
 
 interface Attachment {
-  args: z.infer<typeof attachmentArgs>
+  args: AttachmentArgs
   control: AbortController
   queue: Queue
   sequence: number
@@ -65,12 +72,12 @@ interface Attachment {
 /** Existing Remote follow/write/resize calls terminate at the official attach stream. */
 export class TerminalCarrierCompat {
   private readonly attachments = new Map<string, Attachment>()
-  constructor(private readonly gateway: LocalTypertGateway) {}
+  constructor(private readonly gateway: LocalTypertGateway, private readonly namespace: TerminalNamespace = 'terminal') {}
 
   async open(payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
     signal.throwIfAborted()
-    const args = attachmentArgs.parse(z.object({ args: z.unknown() }).strict().parse(payload).args)
-    const key = `${args.agentId}/${args.id}`
+    const args = attachmentArgs(this.namespace).parse(z.object({ args: z.unknown() }).strict().parse(payload).args)
+    const key = attachmentKey(args)
     this.attachments.get(key)?.control.abort()
     const control = new AbortController()
     const queue = new Queue()
@@ -87,7 +94,8 @@ export class TerminalCarrierCompat {
     this.attachments.set(key, entry)
     let source: AsyncIterable<unknown>
     try {
-      source = await this.gateway.open('terminal/attach', { args: { agentId: args.agentId, id: args.id } }, lifetime, queue)
+      const { attachmentId: _attachment, ...target } = args
+      source = await this.gateway.open(`${this.namespace}/attach`, { args: target }, lifetime, queue)
     } catch (error) { control.abort(); throw error }
     return (async function* () {
       try {
@@ -109,14 +117,16 @@ export class TerminalCarrierCompat {
   }
 
   async call(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult> {
-    const fields = endpoint === 'terminal/write' ? { data: z.string().max(64 * 1024) } : dimensions
-    const args: z.infer<typeof attachmentArgs> & Record<string, unknown> = attachmentArgs.extend(fields).parse(z.object({ args: z.unknown() }).strict().parse(payload).args)
-    const entry = this.attachments.get(`${args.agentId}/${args.id}`)
+    const write = endpoint === `${this.namespace}/write`
+    if (!write && endpoint !== `${this.namespace}/resize`) throw new RpcError('METHOD_NOT_ALLOWED', 'Unsupported terminal input.')
+    const fields = write ? { data: z.string().max(64 * 1024) } : dimensions
+    const args = attachmentArgs(this.namespace).extend(fields).parse(z.object({ args: z.unknown() }).strict().parse(payload).args)
+    const entry = this.attachments.get(attachmentKey(args))
     if (!entry || entry.args.attachmentId !== args.attachmentId || !entry.writable) throw new RpcError('PERMISSION_DENIED', 'This terminal input attachment is not writable.')
     if (entry.pending.size >= 32) throw new RpcError('RATE_LIMITED', 'Too many unacknowledged terminal inputs.')
     signal.throwIfAborted()
     const sequence = ++entry.sequence
-    const value = input.parse({ type: endpoint === 'terminal/write' ? 'write' : 'resize', sequence,
+    const value = input.parse({ type: write ? 'write' : 'resize', sequence,
       ...('data' in args ? { data: args.data } : { cols: args.cols, rows: args.rows }) })
     const abort = () => entry.control.abort()
     signal.addEventListener('abort', abort, { once: true })
@@ -133,8 +143,9 @@ export class TerminalCarrierCompat {
 /** Native RC.1 Client attach stream over the existing encrypted terminal subset. */
 export async function openRemoteTerminal(
   target: RemoteTypertGatewayTarget, payload: unknown, signal: AbortSignal, uplink: AsyncIterable<unknown>,
+  namespace: TerminalNamespace = 'terminal',
 ): Promise<AsyncIterable<unknown>> {
-  const args = z.object({ agentId: identity, id: identity }).strict().parse(z.object({ args: z.unknown() }).strict().parse(payload).args)
+  const args = targetArgs[namespace].parse(z.object({ args: z.unknown() }).strict().parse(payload).args)
   const attachmentId = uuidV7()
   const control = new AbortController()
   const lifetime = AbortSignal.any([signal, control.signal])
@@ -145,7 +156,7 @@ export async function openRemoteTerminal(
   lifetime.addEventListener('abort', abort, { once: true })
   lifetime.throwIfAborted()
   let source: AsyncIterable<unknown>
-  try { source = await target.open('terminal/follow', { args: { ...args, attachmentId } }, lifetime) }
+  try { source = await target.open(`${namespace}/follow`, { args: { ...args, attachmentId } }, lifetime) }
   catch (error) { control.abort(); throw error }
   let startInput!: () => void
   const ready = new Promise<void>(resolve => { startInput = resolve })
@@ -174,7 +185,7 @@ export async function openRemoteTerminal(
         const value: Input = input.parse(next.value)
         if (value.sequence !== ++sequence) throw new RpcError('INVALID_MESSAGE', 'Terminal input sequence is invalid.')
         if (!writable) { output.push({ type: 'ack', sequence, refusal: 'read-only' }); continue }
-        const result = await target.dispatch(`terminal/${value.type}`, { args: { ...args, attachmentId,
+        const result = await target.dispatch(`${namespace}/${value.type}`, { args: { ...args, attachmentId,
           ...(value.type === 'write' ? { data: value.data } : { cols: value.cols, rows: value.rows }) } }, lifetime)
         if (!result.ok) throw Object.assign(new Error(result.error.message), result.error)
         if (!lifetime.aborted) output.push({ type: 'ack', sequence })

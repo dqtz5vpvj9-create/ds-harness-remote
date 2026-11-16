@@ -5,7 +5,7 @@ import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
 import { TerminalPolicy } from '../src/terminal-policy.js'
 
-function fixture(writable = true, acknowledge = true) {
+function fixture(writable = true, acknowledge = true, namespace: 'terminal' | 'sourceTerminal' = 'terminal') {
   const inputs: unknown[] = []
   const gateway: LocalTypertGateway = {
     supportsCarrier: true,
@@ -13,8 +13,9 @@ function fixture(writable = true, acknowledge = true) {
     dispatch: vi.fn(async () => ({ ok: true as const })),
     failure: error => ({ code: 'failed', message: String(error), details: {} }),
     open: vi.fn(async (endpoint, payload, signal, uplink) => {
-      expect(endpoint).toBe('terminal/attach')
-      expect(payload).toEqual({ args: { agentId: 's1', id: 't1' } })
+      expect(endpoint).toBe(`${namespace}/attach`)
+      expect(payload).toEqual({ args: namespace === 'terminal' ? { agentId: 's1', id: 't1' }
+        : { sessionId: 'hhpi:machine:source:codex:thread', id: 't1' } })
       return (async function* () {
         yield { type: 'snapshot', sequence: 0, screen: '', info: { id: 't1', state: 'running' }, writable }
         for await (const value of uplink!) {
@@ -25,11 +26,37 @@ function fixture(writable = true, acknowledge = true) {
       })()
     }),
   }
-  return { gateway, inputs, carrier: new TerminalCarrierCompat(gateway) }
+  return { gateway, inputs, carrier: new TerminalCarrierCompat(gateway, namespace) }
 }
 const args = { agentId: 's1', id: 't1', attachmentId: 'a1' }
 
 describe('RC.1 terminal carrier compatibility', () => {
+  it('carries source-owned terminals through the same duplex adapter without central Agent lookup', async () => {
+    const { gateway, inputs } = fixture(true, true, 'sourceTerminal')
+    let enabled = true
+    const frames: unknown[] = []
+    const bridge = new HarnessRemoteBridge(gateway, async (_event, data) => { frames.push(data) }, undefined,
+      '0.2.2-rc.1', new TerminalPolicy(() => enabled, 'peer', new Map()))
+    const args = { sessionId: 'hhpi:machine:source:codex:thread', id: 't1', attachmentId: 'source-view' }
+    try {
+      await bridge.openStream({ endpoint: 'sourceTerminal/follow', streamId: 'source-terminal', payload: { args } })
+      await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ value: expect.objectContaining({ type: 'snapshot' }) })))
+      expect(await bridge.call({ endpoint: 'sourceTerminal/write', payload: { args: { ...args, data: 'once' } } })).toEqual({ ok: true })
+      expect(inputs).toEqual([{ type: 'write', sequence: 1, data: 'once' }])
+      await expect(bridge.call({ endpoint: 'sourceTerminal/write', payload: { args: { ...args, sessionId: 'hhpi:other:source:codex:thread', data: 'wrong host' } } }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      enabled = false
+      await expect(bridge.call({ endpoint: 'sourceTerminal/write', payload: { args: { ...args, data: 'disabled' } } }))
+        .rejects.toMatchObject({ code: 'TERMINAL_DISABLED' })
+      enabled = true
+      await bridge.closeStream({ streamId: 'source-terminal' })
+      await expect(bridge.call({ endpoint: 'sourceTerminal/write', payload: { args: { ...args, data: 'disconnected' } } }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      expect(inputs).toHaveLength(1)
+      expect(gateway.dispatch).not.toHaveBeenCalled()
+    } finally { await bridge.closeAll() }
+  })
+
   it('selects the official duplex contract only from its introducing release', async () => {
     await runScenarios([
       [undefined, false], ['0.2.0-rc.2', false], ['0.2.1-alpha.1', false], ['0.2.1-alpha.2', false],

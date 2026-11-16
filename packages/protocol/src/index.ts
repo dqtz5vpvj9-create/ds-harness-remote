@@ -22,6 +22,7 @@ export {
 import { encodeBinaryUpload, decodeBinaryUpload } from './binary-upload.js'
 export { BINARY_UPLOAD_CAPABILITY, BINARY_UPLOAD_CHUNK_BYTES } from './binary-upload.js'
 export * from './loopback.js'
+export * from './native-sources.js'
 import { parseWireJson } from './wire-json.js'
 export { parseWireJson } from './wire-json.js'
 import { z } from 'zod'

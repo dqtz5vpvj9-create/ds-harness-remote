@@ -48,7 +48,7 @@ export class ClientReconnect {
   }
 }
 
-function canReconnect(error: unknown): boolean {
+export function canReconnect(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return true
   const failure = error as { code?: unknown; retryable?: unknown }
   // Explicit protocol/authentication failures fail closed, including 4003.

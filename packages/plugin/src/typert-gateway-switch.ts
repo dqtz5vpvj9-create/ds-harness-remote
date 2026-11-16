@@ -208,6 +208,8 @@ export class TypertGatewaySwitch {
   private openRemote(endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>): Promise<AsyncIterable<unknown>> {
     return endpoint === 'terminal/attach'
       ? openRemoteTerminal(this.remoteTarget!, payload, signal, uplink ?? endedUplink())
+      : endpoint === 'sourceTerminal/attach'
+        ? openRemoteTerminal(this.remoteTarget!, payload, signal, uplink ?? endedUplink(), 'sourceTerminal')
       : this.remoteTarget!.open(endpoint, payload, signal)
   }
 

@@ -2,6 +2,7 @@ import { RemoteClientError, type RemoteClientCore } from '@dsh-remote/client-cor
 import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
+  canRepeatAfterOversizedResponse, NATIVE_SOURCE_BINARY_RESULTS,
   type EventPayload,
   type HarnessApiTransferCommitResult,
   type HarnessApiTransferReadResult,
@@ -121,7 +122,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       try {
         response = await this.client.rpc<unknown>('harness.remote.call', request, signal)
       } catch (error) {
-        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE')) throw error
+        if (!hasErrorCode(error, 'RESPONSE_TOO_LARGE') || !canRepeatAfterOversizedResponse(endpoint)) throw error
         response = await this.callTransferred(encoded, signal)
       }
     }
@@ -704,7 +705,7 @@ function base64ToBytes(value: string): Uint8Array {
 
 /** Restore binary fields after the JSON-only Remote carrier. */
 function normalizeWorkspaceBinaryResult(endpoint: string, value: unknown): unknown {
-  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render' && !(NATIVE_SOURCE_BINARY_RESULTS as readonly string[]).includes(endpoint)) return value
   if (!isRecord(value) || typeof value.data !== 'string') return value
   return { ...value, data: base64ToBytes(value.data) }
 }

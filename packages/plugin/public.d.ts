@@ -8,6 +8,8 @@ export interface Config {
   terminal?: { enabled?: boolean }
   loopback?: { ports?: number[] }
   forceRelay?: boolean
+  /** Requires a server supporting remote.multi-host.v1. Default: false. */
+  multiHost?: boolean
   logLevel?: 'debug' | 'info' | 'warn' | 'error'
   reconnect?: boolean | {
     initialDelayMs?: number
@@ -18,6 +20,24 @@ export interface Config {
     enabled?: boolean
     binary?: string
   }
+}
+
+/** A retained gateway is permanently addressed to one Host. UI selection
+ * never retargets it; reconnect does not replay requests. */
+export interface RemoteHostGateway {
+  invoke(request: { namespace: string; method: string; args: Readonly<Record<string, unknown>>; signal?: AbortSignal }): Promise<unknown>
+  dispatch(endpoint: string, payload: unknown, signal: AbortSignal): Promise<
+    { ok: true; value?: unknown; attachments?: readonly { path: readonly (string | number)[]; bytes: Uint8Array }[] }
+    | { ok: false; error: { code: string; message: string; details: Record<string, unknown> } }
+  >
+  open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>>
+}
+export interface RemoteHostClient {
+  gatewayForHost(hostId: string): RemoteHostGateway
+  disconnectHost(hostId: string): Promise<void>
+}
+declare module '@deepseek-ai/cordis' {
+  interface Context { dshRemoteClient: RemoteHostClient }
 }
 
 export declare const name: 'ds-harness-remote'

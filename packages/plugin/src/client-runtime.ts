@@ -9,6 +9,7 @@ import type { HarnessMode } from './harness-target.js'
 import { probeRemoteHostFeatures, remoteHostFeatures } from './client-capabilities.js'
 import { ClientCodexStreams } from './client-codex-streams.js'
 import { ClientConnection } from './client-connection.js'
+import { ClientHosts } from './client-hosts.js'
 import { ClientReconnect } from './client-reconnect.js'
 import { ClientControl } from './client-control.js'
 import type {
@@ -54,13 +55,16 @@ import { safeErrorCode } from './safe-error.js'
 import { RemoteSessionTools, type SessionToolOperation } from './remote-session-tools.js'
 import type { OAuthProvider } from './server-api.js'
 import { ClientServerApi, ServerApiError } from './server-api.js'
-import type { TypertGatewayLike } from './typert-gateway-contract.js'
+import type { RemoteTypertGatewayTarget, TypertGatewayLike } from './typert-gateway-contract.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { WeriftFactoryOptions } from './werift-rtc.js'
 import { loadNodeRtcFactory } from './werift-rtc.js'
 
 export class ClientModeRuntime {
   private async connect(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
+    signal?.throwIfAborted()
+    if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
+    if (this.hostConnections) return this.hostConnections.get(targetDeviceId, signal)
     const lifetime = this.remoteLifetime.signal
     const connectionSignal = signal === undefined ? lifetime : AbortSignal.any([lifetime, signal])
     connectionSignal.throwIfAborted()
@@ -86,6 +90,7 @@ export class ClientModeRuntime {
     return this.control.handleControl(endpoint, payload, signal)
   }
   private readonly connection: ClientConnection
+  private readonly hostConnections?: ClientHosts
   private readonly control: ClientControl
   private readonly codexStreamBridge: ClientCodexStreams
 
@@ -154,6 +159,20 @@ export class ClientModeRuntime {
       get logger() { return owner.logger },
       get identities() { return owner.identities },
     })
+    if (config.multiHost) {
+      this.hostConnections = new ClientHosts(async (hostId, signal) => {
+        const remote = await this.connection.connect(hostId, signal, { background: true })
+        remote.client.onClose(error => this.handleRemoteClose(remote, error))
+        return remote
+      }, config.reconnect, remote => {
+        if (!this.closed && remote.features.remoteGateway && this.recoverable?.target.deviceId === remote.target.deviceId
+          && this.gatewaySwitch.status().mode === 'remote') {
+          this.connected = remote
+          this.selectRemoteTarget(remote)
+          this.recoveryGeneration++
+        }
+      })
+    }
     this.control = new ClientControl({
       detailedStatus: (...args) => owner.detailedStatus(...args),
       devices: (...args) => owner.devices(...args),
@@ -448,7 +467,7 @@ export class ClientModeRuntime {
 
   async setMode(mode: HarnessMode, targetDeviceId?: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (mode === 'local') {
-      await this.leaveRemote()
+      await this.leaveRemote(!this.hostConnections)
       this.logger.info('Harness target switched', { mode: 'local' })
       return this.status()
     }
@@ -462,13 +481,13 @@ export class ClientModeRuntime {
       this.assertRemoteCompatible(next)
     } catch (error) {
       this.connection.clearConnectionProgress(next.progressRunId)
-      await next.client.close().catch(() => undefined)
+      if (!this.hostConnections) await next.client.close().catch(() => undefined)
       throw error
     }
     const previous = this.connected
     await this.closePreview()
     if (signal.aborted || lifetime.aborted || this.closed) {
-      await next.client.close().catch(() => undefined)
+      if (!this.hostConnections) await next.client.close().catch(() => undefined)
       throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
     }
     this.connected = next
@@ -480,7 +499,7 @@ export class ClientModeRuntime {
     this.assertRemoteCurrent(next, signal)
     this.selectRemoteTarget(next)
     await this.codexStreamBridge.closeCodexStreams(previous?.client)
-    await previous?.client.close().catch(() => undefined)
+    if (!this.hostConnections && previous !== next) await previous?.client.close().catch(() => undefined)
     this.logger.info('Harness target switched', { mode: 'remote', targetDeviceId: shortId(next.target.deviceId) })
     return this.status()
   }
@@ -553,6 +572,7 @@ export class ClientModeRuntime {
     this.assertHostAuthorizationForDeviceDiscovery()
     if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
     const activeSignal = AbortSignal.any([signal, this.remoteLifetime.signal])
+    if (this.hostConnections) return query(await this.hostConnections.get(targetDeviceId, activeSignal), activeSignal)
     // A device has one Control connection. Opening a second connection with
     // the same identity replaces the warm UI connection on the Server.
     const shared = this.connected
@@ -838,7 +858,7 @@ export class ClientModeRuntime {
     }
   }
 
-  private async leaveRemote(): Promise<void> {
+  private async leaveRemote(closeHosts = true): Promise<void> {
     this.clientAuthRequired = false
     this.beginSelection()
     this.sessionTools.invalidate()
@@ -856,8 +876,10 @@ export class ClientModeRuntime {
       this.closeCursorVirtual(),
       this.closePreview(),
       this.codexStreamBridge.closeCodexStreams(previous?.client),
-      previous?.client.close(),
+      closeHosts ? previous?.client.close() : undefined,
+      closeHosts ? this.hostConnections?.close() : undefined,
     ])
+    if (closeHosts) this.connection.closeAccountControl()
     const failure = results.find(result => result.status === 'rejected')
     if (failure?.status === 'rejected') throw failure.reason
   }
@@ -895,6 +917,30 @@ export class ClientModeRuntime {
 
   private activeRemote(): ConnectedRemote | undefined {
     return this.connected
+  }
+
+  /** Source/session owners retain this gateway. UI selection cannot retarget
+   * any request; transient reconnect replaces only this Host's connection. */
+  gatewayForHost(hostId: string): RemoteTypertGatewayTarget {
+    if (!this.hostConnections) throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'Multi-host mode is not enabled.')
+    const current = async (signal?: AbortSignal): Promise<RemoteTypertGateway> => {
+      if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
+      this.assertHostAuthorizationForDeviceDiscovery()
+      const remote = await this.hostConnections!.get(hostId, signal)
+      this.assertHostAuthorizationForDeviceDiscovery()
+      return this.remoteTypertGateway(remote)
+    }
+    return {
+      invoke: async request => (await current(request.signal)).invoke(request),
+      dispatch: async (endpoint, payload, signal) => (await current(signal)).dispatch(endpoint, payload, signal),
+      open: async (endpoint, payload, signal) => (await current(signal)).open(endpoint, payload, signal),
+    }
+  }
+
+  async disconnectHost(hostId: string): Promise<void> {
+    if (!this.hostConnections) throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'Multi-host mode is not enabled.')
+    if (this.recoverable?.target.deviceId === hostId) this.recoverable = undefined
+    await this.hostConnections.release(hostId)
   }
 
   private selectRemoteTarget(remote: ConnectedRemote): void {
@@ -1101,13 +1147,13 @@ export class ClientModeRuntime {
       assertCurrent()
     } catch (error) {
       this.connection.clearConnectionProgress(next.progressRunId)
-      await next.client.close().catch(() => undefined)
+      if (!this.hostConnections) await next.client.close().catch(() => undefined)
       throw error
     }
     const previous = this.connected
     this.connected = next
     this.connection.clearConnectionProgress(next.progressRunId)
-    await previous?.client.close().catch(() => undefined)
+    if (!this.hostConnections && previous !== next) await previous?.client.close().catch(() => undefined)
     return next
   }
 
@@ -1135,7 +1181,7 @@ export class ClientModeRuntime {
   private handleRemoteClose(remote: ConnectedRemote, error?: Error): void {
     if (this.connected !== remote) return
     const recover = this.recoverable === remote
-    this.recoverable = undefined
+    if (!this.hostConnections) this.recoverable = undefined
     this.connected = undefined
     this.connectionProgress = undefined
     this.pendingWorkspaceSelection = undefined
@@ -1149,6 +1195,7 @@ export class ClientModeRuntime {
     // with Harness authority after a disconnect.
     if (!this.closed && this.gatewaySwitch.status().mode === 'remote') this.noteClientAuthFailure(error)
     if (!recover || this.closed) return
+    if (this.hostConnections) return // Host owner has its own independent retry loop.
     this.reconnect.start(async signal => {
       await cleanup
       signal.throwIfAborted()
