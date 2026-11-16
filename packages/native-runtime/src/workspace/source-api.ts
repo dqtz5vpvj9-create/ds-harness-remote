@@ -1,5 +1,6 @@
 /** Independent source workspace carrier; official Files codecs and native binary results are reused. */
 import { z } from 'zod';
+import { SOURCE_UPLOAD_CHUNK_BYTES } from '../shared/source-upload.ts';
 import { TYPERT_REMOTE as FILES_REMOTE } from '@deepseek-ai/dsh-api-workspace-files/remote';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
 import { RemoteError, type InvocationDescriptor, type RemoteResult, type TypertRemoteContribution, type TypertRemoteNamespaceMap } from '@deepseek-ai/dsh-typert-protocol';
@@ -38,6 +39,14 @@ export const workspaceDocumentSchema = z.strictObject({ resource: workspaceResou
         ...(modified === undefined ? {} : { modified }), ...(format === undefined ? {} : { format }) }));
 const document = workspaceDocumentSchema;
 const byteOptions = z.strictObject({ range: z.strictObject({ offset: z.number().int().nonnegative().optional(), length: z.number().int().positive().optional() }).optional(), baseFile: path.optional() });
+/** Bounded canonical base64 for JSON-only encrypted carriers. The source still
+ * owns the durable offset; a lost reply must be reconciled with uploadStatus. */
+export const sourceUploadChunk = workspaceUploadRequestSchema.extend({
+    offset: z.number().int().nonnegative(),
+    data: z.string().min(4).max(Math.ceil(SOURCE_UPLOAD_CHUNK_BYTES / 3) * 4)
+        .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+});
+export type SourceUploadChunk = z.input<typeof sourceUploadChunk>;
 export const sourceWorkspaceInputs = {
     directories: sourceDirectoryRequest,
     resolve: z.strictObject({ sessionId: id }),
@@ -49,6 +58,7 @@ export const sourceWorkspaceInputs = {
     uploadInputs: z.strictObject({ sessionId: id, receiptIds: z.array(z.uuid()).max(100), clientUserMessageId: id.optional() }),
     beginUpload: workspaceUploadStartSchema,
     uploadStatus: workspaceUploadRequestSchema,
+    appendUpload: sourceUploadChunk,
     finishUpload: workspaceUploadRequestSchema,
     cancelUpload: workspaceUploadRequestSchema,
     save: workspaceFileSaveRequestSchema,
@@ -74,6 +84,7 @@ export interface SourceWorkspaceApi extends OfficialWorkspaceFilesApi {
     uploadInputs?(request: Request<'uploadInputs'>, signal?: AbortSignal): Promise<RemoteResult<{ input: SourceUploadInput[] }>>;
     beginUpload(request: Request<'beginUpload'>, signal?: AbortSignal): Promise<RemoteResult<WorkspaceUploadTransfer>>;
     uploadStatus(request: Request<'uploadStatus'>, signal?: AbortSignal): Promise<RemoteResult<WorkspaceUploadStatus>>;
+    appendUpload?(request: SourceUploadChunk, signal?: AbortSignal): Promise<RemoteResult<{ receivedBytes: number }>>;
     finishUpload(request: Request<'finishUpload'>, signal?: AbortSignal): Promise<RemoteResult<WorkspaceMutationResult<WorkspaceUploadReceipt>>>;
     cancelUpload(request: Request<'cancelUpload'>, signal?: AbortSignal): Promise<RemoteResult<WorkspaceUploadStatus>>;
     save(request: Request<'save'>, signal?: AbortSignal): Promise<RemoteResult<WorkspaceMutationResult<WorkspaceFileStat>>>;
@@ -98,6 +109,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
         'sourceWorkspace/uploadInputs': NonNullable<SourceWorkspaceApi['uploadInputs']>;
         'sourceWorkspace/beginUpload': SourceWorkspaceApi['beginUpload'];
         'sourceWorkspace/uploadStatus': SourceWorkspaceApi['uploadStatus'];
+        'sourceWorkspace/appendUpload': NonNullable<SourceWorkspaceApi['appendUpload']>;
         'sourceWorkspace/finishUpload': SourceWorkspaceApi['finishUpload'];
         'sourceWorkspace/cancelUpload': SourceWorkspaceApi['cancelUpload'];
         'sourceWorkspace/save': SourceWorkspaceApi['save'];
@@ -144,6 +156,7 @@ const results = { directories: codec('sourceDirectories', sourceDirectoryListing
         z.strictObject({ type: z.literal('localImage'), path: id }),
     ])).max(100) })),
     beginUpload: codec('beginUpload', uploadTransfer), uploadStatus: codec('uploadStatus', uploadStatus),
+    appendUpload: codec('appendUpload', z.strictObject({ receivedBytes: nonnegative })),
     finishUpload: codec('finishUpload', uploadResult), cancelUpload: codec('cancelUpload', uploadStatus),
     save: codec('save', workspaceMutationResultSchema(fileStat)),
     manage: codec('manage', workspaceMutationResultSchema(entry.nullable())),

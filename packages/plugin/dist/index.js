@@ -64766,6 +64766,7 @@ var NATIVE_SOURCE_CALLS = [
   "sourceWorkspace/uploadInputs",
   "sourceWorkspace/beginUpload",
   "sourceWorkspace/uploadStatus",
+  "sourceWorkspace/appendUpload",
   "sourceWorkspace/finishUpload",
   "sourceWorkspace/cancelUpload",
   "sourceWorkspace/save",

@@ -101,7 +101,8 @@ jobs:
       - name: Verify shared runtime over the self-hosted multi-host carrier
         run: |
           pnpm exec tsc -p tests/tsconfig.json
-          pnpm exec vitest run tests/native-multihost-network.test.ts tests/native-sdk.test.ts
+          node --import tsx --test tests/native-multihost-network.test.ts
+          pnpm exec vitest run tests/native-sdk.test.ts
 
       # Android prebuild recompiles shared packages. Serialize workspace builds
       # so Plugin bundling cannot read dist files while tsc rewrites them.

@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Real private SQLite/files and Fetch streams; the final source commit is the explicit boundary fixture. */
 import assert from 'node:assert/strict';
 declare module '@deepseek-ai/dsh-typert-protocol' { interface PrincipalMap { reader: { kind: 'reader' } } }
@@ -15,7 +16,7 @@ const binding: WorkspaceBinding = { target: { hostId: 'local', sessionId: 'hhpi:
     workspaceId: 'source', root: '/source', pathStyle: 'posix' };
 const start = { target: binding.target, operationId: 'upload-intent', bytes: 6, mimeType: 'text/plain', destination: { kind: 'file' as const, path: 'file.txt', baseline: { kind: 'absent' as const } } };
 async function fixture(t: test.TestContext, commit?: SourceUploadOptions['commit'], receipt?: SourceUploadOptions['receipt']) {
-    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-source-upload-'), controller = new AbortController();
+    const directory = await mkdtemp(join(tmpdir(), 'hhpi-source-upload-')), controller = new AbortController();
     const access: WorkspaceAccess = { scope: 'account', signal: controller.signal, assertAllowed(target) { assert.deepEqual(target, binding.target); } };
     const options: SourceUploadOptions = { directory, signal: controller.signal, chunkBytes: 4, ...(receipt ? { receipt } : {}), commit: commit ?? (async (_binding, request, path) => {
         assert.equal(await readFile(path, 'utf8'), 'abcdef');

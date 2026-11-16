@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture } from './fixtures/hhpi-native-metadata.ts';
 /** Real source adapter and persistent history; only the native transport and clock are controlled. */
 import assert from 'node:assert/strict';
@@ -13,7 +14,7 @@ const flush = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
 
 test('thread readers share bounded source reconnect backoff while cached history stays readable', async t => {
     t.mock.timers.enable({ apis: ['setInterval'] });
-    const directory = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-source-backoff-'));
+    const directory = await mkdtemp(join(tmpdir(), 'hhpi-source-backoff-'));
     let now = 10_000, online = true, available = true, attempts = 0, disconnected = (): void => {};
     const threads: NativeThread[] = ['one', 'two'].map(id => ({ id, cwd: directory, createdAt: 1, updatedAt: 1,
         name: `Synthetic ${id}`, status: { type: 'idle' } }));

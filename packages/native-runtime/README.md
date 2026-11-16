@@ -72,5 +72,43 @@ argument supplies an offline archive with the same required checksum.
 The cross-package network contract is `tests/native-multihost-network.test.ts`:
 it runs the actual self-hosted Server, Host/Client runtimes and encrypted relay,
 with a synthetic execution boundary and the production durable receipt ledger.
-It covers loss of A's accepted response while B stays usable and A reconnects;
-it does not constitute provider, browser or device acceptance.
+It covers loss of A's accepted message and file-upload responses while B stays
+usable and A reconnects. Upload resumes at the original durable offset and
+compares all published bytes. Run it with `node --import tsx --test
+tests/native-multihost-network.test.ts`; Node's runner loads the real SQLite
+backend. It does not constitute provider, browser or device acceptance.
+
+## Standalone source Host
+
+The `@dsh-remote/native-runtime/host` entry is an ordinary Cordis plugin that
+registers these source services without HHPI's Runner. Load it alongside the
+Remote Host plugin in a DSH profile using the pinned SDK. Pass `configFile`
+pointing to a private, operator-authored JSON file:
+
+```json
+{
+  "version": 1,
+  "directory": "/absolute/existing/source-data",
+  "sources": [
+    { "id": "original-source-id", "machineId": "original-machine-id",
+      "engine": "codex", "command": "/absolute/path/to/codex",
+      "args": ["app-server"], "codexHome": "/absolute/original/codex-home" }
+  ],
+  "sourceWorkspaces": [
+    { "sourceId": "original-source-id", "provider": "local-system" }
+  ]
+}
+```
+
+Preserve the source IDs, native configuration and source-data directory exactly
+when migrating. Stop the former source owner before enabling this entry;
+running tasks must finish or remain on their verified original path. The entry
+rejects a second source-service owner in the same Host before opening native
+processes. Keep Remote's separate legacy `codex.app.*` backend disabled for
+these sources. Native login and source authorization remain with the original
+CLI and Gateway; this entry adds no account or network listener.
+
+`sourceWorkspace/appendUpload` carries at most 256 KiB of bytes per call as
+canonical base64 on JSON-only encrypted transports. It shares the existing
+owner-only upload store with the HTTP chunk route. After an interrupted call,
+read `uploadStatus` and resume at its returned offset; do not replay the chunk.

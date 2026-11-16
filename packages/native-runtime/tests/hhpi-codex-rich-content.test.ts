@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Native media fixtures exercise the production projection, grants and immutable image store. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -20,7 +21,7 @@ const cases: NativeItem[] = [
   { id: 'function', type: 'functionCallOutput', name: 'fixture', output: [{ type: 'input_image', image_url: `data:image/png;base64,${PNG}` }] },
 ];
 for (const item of cases) test(`${item.type}/${item.id}: image output is readable answer content with a revocable conversation grant`, async () => {
-  const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-rich-content-');
+  const directory = await mkdtemp(join(tmpdir(), 'hhpi-rich-content-'));
   const index = new SourceEventIndex(':memory:', session), lifetime = new AbortController(), ready = Promise.withResolvers<void>();
   const reads: string[] = [];
   const attachments = new CodexAttachments(index, join(directory, 'attachments', 'v1'), async path => { reads.push(path); return { dataBase64: PNG }; }, lifetime.signal, ({ turnId, itemId }) => {
@@ -53,7 +54,7 @@ test('native plans retain an explicit plan marker and ordinary file paths do not
 });
 
 test('preparing an MCP image preserves adjacent structured results, text order and the original native failure', async () => {
-  const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-rich-mixed-');
+  const directory = await mkdtemp(join(tmpdir(), 'hhpi-rich-mixed-'));
   const index = new SourceEventIndex(':memory:', session), lifetime = new AbortController(), ready = Promise.withResolvers<void>();
   const attachments = new CodexAttachments(index, join(directory, 'images'), async () => { throw new Error('Embedded media must not read a source path'); }, lifetime.signal, ({ turnId, itemId }) => {
     const state = history.itemState(turnId, itemId)!; history.acceptItem(session, turnId, state.item, state.completed); ready.resolve();

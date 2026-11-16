@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Production source file owner and pinned official Files over isolated, real OS directories. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -9,7 +10,7 @@ import { LocalSourceFileOwner } from '../src/workspace/source-files.ts';
 import type { WorkspaceAccess, WorkspaceBinding } from '../src/workspace/service-types.ts';
 
 async function fixture(options: Partial<ConstructorParameters<typeof LocalSourceFileOwner>[0]> = {}) {
-    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-source-files-');
+    const directory = await mkdtemp(join(tmpdir(), 'hhpi-source-files-'));
     const root = join(directory, 'source'), database = join(directory, 'private', 'receipts.sqlite'); await mkdir(root);
     const lifetime = new AbortController();
     const binding: WorkspaceBinding = { target: { hostId: 'source-host', sessionId: 'exact-native-session' }, machineId: 'source-machine',

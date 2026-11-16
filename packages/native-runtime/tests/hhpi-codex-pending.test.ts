@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Production persistence/projection/operation owners; native RPC is the explicit
  * fixture boundary. Canonical records follow the observed 0.162 paginated format. */
 import assert from 'node:assert/strict';
@@ -22,7 +23,7 @@ import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-nativ
 import { SyntheticResponsesModel } from './fixtures/hhpi/model.ts';
 
 async function fixture(t: TestContext) {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-pending-test-'), directory = join(home, 'view');
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-pending-test-')), directory = join(home, 'view');
     await mkdir(join(home, 'sessions'));
     const path = join(home, 'sessions', 'rollout-original.jsonl'), turnId = 'original-turn', nativeId = 'original-thread';
     const sessionId = sourceSessionId({ machineId: 'machine', sourceId: 'source', engine: 'codex', nativeId });
@@ -198,7 +199,7 @@ test('incomplete canonical tails and replacement calls cannot prove an original 
 });
 
 test('private Unix listener identity survives a client replacement and changes with a rebound daemon', async t => {
-    const root = await mkdtemp('/mnt/cache/data-cache/hhpi-native-identity-'), path = join(root, 'native.sock');
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-identity-')), path = join(root, 'native.sock');
     const instances: Array<Awaited<ReturnType<typeof listen>>> = [], clients: CodexRpc[] = [];
     async function listen() {
         const server = createServer(), sockets = new WebSocketServer({ server });
@@ -234,7 +235,7 @@ test('pinned native source restores its received question after adapter disposal
     skip: !process.env.HHPI_CODEX_PENDING_TEST_COMMAND ? 'Set HHPI_CODEX_PENDING_TEST_COMMAND to the source executable.' : false,
     timeout: 25_000,
 }, async t => {
-    const root = await mkdtemp('/mnt/cache/data-cache/hhpi-native-pending-lifecycle-'), path = join(root, 'native.sock');
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-pending-lifecycle-')), path = join(root, 'native.sock');
     const model = new SyntheticResponsesModel(); await model.start(); model.automatic = false;
     await writeFile(join(root, 'config.toml'), model.config() + '\n[features]\nplugins = false\n');
     const child = spawn(process.env.HHPI_CODEX_PENDING_TEST_COMMAND!, ['app-server', '--listen', `unix://${path}`],

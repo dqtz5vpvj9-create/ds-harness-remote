@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Real sparse metadata/production projection; only the native RPC is a fixture.
  * Mirrors 0.162 Review: no outer task_started, nested interrupted turn, and a
  * stale inProgress sparse row after the outer Review has completed. */
@@ -14,7 +15,7 @@ import { sourceSessionId, type SourcePage } from '../src/remote/protocol.ts';
 
 const threadId = '11111111-1111-4111-8111-111111111111';
 async function fixture(endOnlyFirstWindow = false) {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-review-return-');
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-review-return-'));
     const db = new DatabaseSync(join(home, 'thread_history_1.sqlite'));
     db.exec(`CREATE TABLE thread_turns(thread_id TEXT,turn_id TEXT,status TEXT,started_at INTEGER,completed_at INTEGER,rollout_ordinal INTEGER,rollout_end_ordinal INTEGER,error_json TEXT);
         CREATE TABLE thread_items(thread_id TEXT,turn_id TEXT,item_id TEXT,rollout_ordinal INTEGER,created_at_ms INTEGER,started_at_ms INTEGER,completed_at_ms INTEGER,updated_at_ordinal INTEGER,item_type TEXT);

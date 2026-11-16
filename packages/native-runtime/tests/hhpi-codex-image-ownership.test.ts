@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-native-metadata.ts';
 /** Production image ownership, adapter and index; only native RPC and file bytes are synthetic. */
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ const item = (id: string, caption = id): NativeItem => ({ id, type: 'userMessage
 const flush = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
 async function fixture(t: TestContext, initial: NativeItem[], readImage: (path: string, signal: AbortSignal) => Promise<unknown>) {
-    const privateHome = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-image-ownership-'));
+    const privateHome = await mkdtemp(join(tmpdir(), 'hhpi-image-ownership-'));
     const directory = join(privateHome, 'source');
     const native = { id: 'thread', cwd: '/synthetic', createdAt: 1, updatedAt: 2, status: { type: 'idle' } };
     const items = [...initial];

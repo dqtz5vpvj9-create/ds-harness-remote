@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-native-metadata.ts';
 /** Real native adapter, display index and image storage; only native RPC/file IO are fixtures. */
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ const imageMessages = (entries: readonly SourceEntry[]): string[] => entries.fla
 const flush = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 
 async function fixture(t: TestContext, initialItems: NativeItem[], readImage: (path: string, signal: AbortSignal) => Promise<unknown>, active = true) {
-    const privateHome = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-image-lifecycle-')), directory = join(privateHome, 'source');
+    const privateHome = await mkdtemp(join(tmpdir(), 'hhpi-image-lifecycle-')), directory = join(privateHome, 'source');
     const native = { id: 'thread', cwd: '/synthetic', createdAt: 1, updatedAt: 2, status: { type: active ? 'active' : 'idle' } };
     const items = [...initialItems], fileReads: string[] = [], calls: string[] = [];
     let notify: (frame: NativeNotification) => void = () => {};

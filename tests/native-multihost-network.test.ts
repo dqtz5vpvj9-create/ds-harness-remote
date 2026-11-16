@@ -1,10 +1,12 @@
 import { once } from 'node:events'
 import { createServer } from 'node:net'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { expect, it, vi } from 'vitest'
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { createRemoteServer } from '../apps/server/src/server.js'
 import { OperationLedger } from '../packages/native-runtime/src/remote/operation-ledger.js'
 import { sourceSessionId, type SourceOperation } from '../packages/native-runtime/src/remote/protocol.js'
@@ -16,11 +18,17 @@ import { ServerCredentialStore } from '../packages/plugin/src/server-credentials
 import { resolveConfig } from '../packages/plugin/src/config.js'
 import { SafeLogger } from '../packages/plugin/src/logging.js'
 import type { LocalTypertGateway } from '../packages/plugin/src/typert-gateway-contract.js'
+import { sourceWorkspaceFixture, type SourceWorkspaceFixture } from '../packages/native-runtime/tests/fixtures/source-workspace.ts'
 
 // Real self-hosted Server, WebSockets, Noise, Host/Client runtimes and durable
 // source receipts. Only the native executor and its Typert entry are fixtures.
 // No provider request, production credentials, data or device is used.
-it('keeps B live while A loses an accepted write receipt, then recovers the same durable receipt without replay', async () => {
+async function waitConnected(host: HostPluginRuntime): Promise<void> {
+  const signal = AbortSignal.timeout(5000)
+  while (host.hostStatus().connectedClients.length !== 1) await delay(25, undefined, { signal })
+}
+
+test('keeps B live while A loses message and upload receipts, then recovers without replay or corrupting bytes', { timeout: 20000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'remote-native-network-'))
   const probe = createServer().listen(0, '127.0.0.1')
   await once(probe, 'listening')
@@ -39,6 +47,10 @@ it('keeps B live while A loses an accepted write receipt, then recovers the same
   let executions = 0
   const firstWrite = Promise.withResolvers<void>()
   const releaseWrite = Promise.withResolvers<void>()
+  const chunkStored = Promise.withResolvers<void>()
+  const releaseChunk = Promise.withResolvers<void>()
+  const workspaces: SourceWorkspaceFixture[] = []
+  let chunkCalls = 0
   const operation: SourceOperation = {
     sessionId: sourceSessionId({ machineId: 'machine-a', sourceId: 'native', engine: 'codex', nativeId: 'same-thread' }),
     operationId: 'stable-message-operation', kind: 'send', text: 'synthetic input',
@@ -50,12 +62,22 @@ it('keeps B live while A loses an accepted write receipt, then recovers the same
       const ledgerDirectory = join(directory, `receipts-${name}`)
       await mkdir(ledgerDirectory)
       let ledger = new OperationLedger(ledgerDirectory)
+      const workspace = await sourceWorkspaceFixture(join(directory, `workspace-${name}`), `machine-${name}`)
+      workspaces.push(workspace)
       const gateway: LocalTypertGateway = {
         supportsCarrier: true,
         invoke: async () => undefined,
         open: async () => (async function* () {})(),
         failure: () => ({ code: 'fixture/error', message: 'Synthetic source error', details: {} }),
-        dispatch: async (endpoint, payload) => {
+        dispatch: async (endpoint, payload, signal) => {
+          if (endpoint.startsWith('sourceWorkspace/')) {
+            const result = await workspace.dispatch(endpoint, payload, signal)
+            if (endpoint === 'sourceWorkspace/appendUpload' && result.ok && ++chunkCalls === 1) {
+              chunkStored.resolve()
+              await releaseChunk.promise
+            }
+            return result
+          }
           if (endpoint === 'session/list') return { ok: false, error: { code: 'gateway/arguments-invalid', message: 'Probe only', details: {} } }
           const request = (payload as { args: { request: SourceOperation } }).args.request
           const ownSession = sourceSessionId({ machineId: `machine-${name}`, sourceId: 'native', engine: 'codex', nativeId: 'same-thread' })
@@ -98,14 +120,14 @@ it('keeps B live while A loses an accepted write receipt, then recovers the same
     const read = { namespace: 'hhpi', method: 'read', args: { request: { sessionId: operation.sessionId } } }
     const readB = { ...read, args: { request: { sessionId: sourceSessionId({ machineId: 'machine-b', sourceId: 'native', engine: 'codex', nativeId: 'same-thread' }) } } }
     const [firstA, firstB] = await Promise.all([a!.invoke(read), b!.invoke(readB)])
-    expect(firstA).toEqual({ machine: 'a', content: '完整正文'.repeat(50000) })
-    expect(firstB).toEqual({ machine: 'b', content: '完整正文'.repeat(50000) })
-    await expect(b!.invoke(read)).rejects.toMatchObject({ code: 'remote-access/denied' })
+    assert.deepEqual(firstA, { machine: 'a', content: '完整正文'.repeat(50000) })
+    assert.deepEqual(firstB, { machine: 'b', content: '完整正文'.repeat(50000) })
+    await assert.rejects(b!.invoke(read), { code: 'remote-access/denied' })
     stage = 'select B'
     await client.setMode('remote', hosts[1]!.currentIdentity().deviceId)
     stage = 'accept A write'
     const write = a!.invoke({ namespace: 'hhpi', method: 'operate', args: { request: operation }, signal: AbortSignal.timeout(4000) })
-    const lost = expect(write).rejects.toBeDefined()
+    const lost = assert.rejects(write)
     await Promise.race([firstWrite.promise, write.then(() => { throw new Error('Receipt arrived before network loss') })])
     stage = 'disconnect A'
     await hosts[0]!.connections.close()
@@ -113,22 +135,50 @@ it('keeps B live while A loses an accepted write receipt, then recovers the same
     stage = 'observe lost receipt'
     await lost
     stage = 'read B'
-    expect(await b!.invoke(readB)).toEqual(firstB)
+    assert.deepEqual(await b!.invoke(readB), firstB)
     stage = 'recover A receipt'
-    await vi.waitFor(() => expect(hosts[0]!.hostStatus().connectedClients).toHaveLength(1), { timeout: 5000 })
-    expect(await a!.invoke({ namespace: 'hhpi', method: 'receipt', args: { request: operation }, signal: AbortSignal.timeout(4000) })).toMatchObject({ status: 'accepted', operationId: operation.operationId })
-    expect(executions).toBe(1)
-    expect(await a!.invoke(read)).toEqual(firstA)
+    await waitConnected(hosts[0]!)
+    assert.partialDeepStrictEqual(await a!.invoke({ namespace: 'hhpi', method: 'receipt', args: { request: operation }, signal: AbortSignal.timeout(4000) }), { status: 'accepted', operationId: operation.operationId })
+    assert.equal(executions, 1)
+    assert.deepEqual(await a!.invoke(read), firstA)
+    stage = 'begin source file upload'
+    const target = { hostId: 'local', sessionId: operation.sessionId }
+    const uploadCall = (method: string, request: unknown) => a!.invoke({ namespace: 'sourceWorkspace', method, args: { request }, signal: AbortSignal.timeout(4000) })
+    const binary = Buffer.alloc(300000)
+    for (let i = 0; i < binary.length; i++) binary[i] = i % 256
+    const transfer = await uploadCall('beginUpload', { target, operationId: 'one-binary-upload', bytes: binary.length,
+      destination: { kind: 'file', path: 'binary.dat', baseline: { kind: 'absent' } }, mimeType: 'application/octet-stream' }) as { uploadId: string }
+    const upload = { target, uploadId: transfer.uploadId }
+    stage = 'lose stored chunk reply'
+    const pendingChunk = uploadCall('appendUpload', { ...upload, offset: 0, data: binary.subarray(0, 200000).toString('base64') })
+    const chunkLost = assert.rejects(pendingChunk)
+    await Promise.race([chunkStored.promise, pendingChunk.then(() => { throw new Error('Chunk acknowledged before network loss') })])
+    await hosts[0]!.connections.close()
+    releaseChunk.resolve()
+    await chunkLost
+    assert.deepEqual(await b!.invoke(readB), firstB)
+    stage = 'resume upload at durable offset'
+    await waitConnected(hosts[0]!)
+    assert.partialDeepStrictEqual(await uploadCall('uploadStatus', upload), { state: 'uploading', transfer: { receivedBytes: 200000 } })
+    assert.equal(chunkCalls, 1)
+    assert.deepEqual(await uploadCall('appendUpload', { ...upload, offset: 200000, data: binary.subarray(200000).toString('base64') }), { receivedBytes: binary.length })
+    const finished = await uploadCall('finishUpload', upload)
+    assert.partialDeepStrictEqual(finished, { status: 'applied', operationId: 'one-binary-upload' })
+    assert.deepEqual(await readFile(join(workspaces[0]!.root, 'binary.dat')), binary)
+    assert.deepEqual(await uploadCall('finishUpload', upload), finished)
+    assert.equal(chunkCalls, 2)
     await client.disconnectHost(hosts[0]!.currentIdentity().deviceId)
-    expect(await b!.invoke(readB)).toEqual(firstB)
-    expect(executions).toBe(1)
+    assert.deepEqual(await b!.invoke(readB), firstB)
+    assert.equal(executions, 1)
   } catch (cause) {
     throw new Error(`Multi-host network scenario failed at ${stage}`, { cause })
   } finally {
     releaseWrite.resolve()
+    releaseChunk.resolve()
     await client?.close()
     await Promise.all(hosts.map(host => host.close()))
+    await Promise.all(workspaces.map(workspace => workspace.close()))
     await server.close()
     await rm(directory, { recursive: true, force: true })
   }
-}, 20000)
+})

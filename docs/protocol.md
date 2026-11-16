@@ -2247,6 +2247,14 @@ native calls and terminal input never repeat automatically. For uncertain
 writes query `hhpi/receipt` or `hhpi/nativeReceipt` with the original operation
 identity. A connection close is not a user rejection or an empty-history result.
 
+`sourceWorkspace/appendUpload` accepts `{ request: { target, uploadId, offset,
+data } }` under Typert `args`. `data` is canonical base64 for at most 256 KiB,
+and the result is `{ receivedBytes }`. Source owner authorization, exact session,
+upload identity and expected offset are checked by the native service. A lost
+reply is recovered through `sourceWorkspace/uploadStatus`; this mutation is not
+eligible for automatic replay or response-size fallback. HTTP and encrypted RPC
+use the same source upload store and final publication receipt.
+
 Source terminals reuse the existing terminal compatibility adapter:
 `sourceTerminal/follow { sessionId, id, attachmentId }` opens the source's
 official `sourceTerminal/attach` duplex stream. `write` and `resize` carry the

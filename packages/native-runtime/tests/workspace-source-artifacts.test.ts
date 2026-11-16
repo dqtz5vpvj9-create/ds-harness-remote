@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Real official source attachment storage/receipts; source grant checks and generated reader are explicit boundaries. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -12,7 +13,7 @@ import { sourceWorkspaceInputs, SOURCE_WORKSPACE_REMOTE } from '../src/workspace
 
 const binding: WorkspaceBinding = { target: { hostId: 'local', sessionId: 'hhpi:machine:source:codex:thread' }, machineId: 'machine', workspaceId: 'source', root: '/source', pathStyle: 'posix' };
 async function fixture(t: test.TestContext) {
-    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-source-artifacts-'), ctx = new Context(), signal = new AbortController();
+    const directory = await mkdtemp(join(tmpdir(), 'hhpi-source-artifacts-')), ctx = new Context(), signal = new AbortController();
     t.after(async () => { signal.abort(); await ctx.fiber.dispose(); await rm(directory, { recursive: true, force: true }); });
     let allowed = true;
     const access: WorkspaceAccess = { scope: 'account', signal: signal.signal, assertAllowed(target) { assert.deepEqual(target, binding.target); if (!allowed) throw new Error('Source grant revoked'); } };

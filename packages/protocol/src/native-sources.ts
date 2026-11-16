@@ -9,7 +9,7 @@ export const NATIVE_SOURCE_CALLS = [
   'sourceWorkspace/openDocument', 'sourceWorkspace/readDocumentBytes',
   'sourceWorkspace/inspect', 'sourceWorkspace/search', 'sourceWorkspace/git',
   'sourceWorkspace/uploadInputs', 'sourceWorkspace/beginUpload', 'sourceWorkspace/uploadStatus',
-  'sourceWorkspace/finishUpload', 'sourceWorkspace/cancelUpload', 'sourceWorkspace/save',
+  'sourceWorkspace/appendUpload', 'sourceWorkspace/finishUpload', 'sourceWorkspace/cancelUpload', 'sourceWorkspace/save',
   'sourceWorkspace/manage', 'sourceWorkspace/receipt',
   'sourceTerminal/environment', 'sourceTerminal/shells', 'sourceTerminal/list',
   'sourceTerminal/create', 'sourceTerminal/rename', 'sourceTerminal/close',

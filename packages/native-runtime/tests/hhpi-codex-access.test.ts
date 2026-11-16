@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { CodexUploads } from '../src/remote/codex-uploads.ts';
 import { randomUUID, createHash } from 'node:crypto';
 /** Production native carrier/ledger; only Codex RPC is synthetic. */
@@ -13,7 +14,7 @@ import { SourceGateway } from '../src/remote/gateway.ts';
 import type { SourceAdapter } from '../src/remote/protocol.ts';
 
 async function fixture(t: test.TestContext) {
-    const root = await mkdtemp('/mnt/cache/data-cache/hhpi-native-access-');
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-access-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     const notifications = new Set<(value: NativeNotification) => void>(), requests = new Set<(value: NativeRequest) => void>(), disconnects = new Set<() => void>();
     const calls: Array<{ method: string; params: unknown; write?: boolean }> = [];
@@ -93,7 +94,7 @@ test('pinned native Codex settings update reaches the original thread and readba
     const { writeFile } = await import('node:fs/promises');
     const { DirectCodexAdapter } = await import('../src/remote/codex-adapter.ts');
     const { SyntheticResponsesModel } = await import('./fixtures/hhpi/model.ts');
-    const root = await mkdtemp('/mnt/cache/data-cache/hhpi-native-settings-');
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-settings-'));
     const model = new SyntheticResponsesModel(); await model.start();
     await writeFile(join(root, 'config.toml'), `${model.config()}\n[features]\nplugins = false\n`);
     const adapter = new DirectCodexAdapter({ id: 'native-settings', machineId: 'fixture', engine: 'codex', command: process.env.HHPI_CODEX_TEST_COMMAND!, args: ['app-server'], codexHome: root, cwd: root, ownership: 'exclusive' }, join(root, 'index'));

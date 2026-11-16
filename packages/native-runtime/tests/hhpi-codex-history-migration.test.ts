@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-native-metadata.ts';
 /** Real source indexes and projector; the accepted native records are synthetic. */
 import assert from 'node:assert/strict';
@@ -26,7 +27,7 @@ const thread: NativeThread = { id: identity.nativeId, cwd: session.cwd, createdA
 const checkpoint = { version: 1, state: 'complete', updatedAt: 30, statusType: 'idle' };
 
 async function fixture(run: (path: string, destination: CodexHistory, oldEpoch: string) => void): Promise<void> {
-    const directory = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-codex-migration-')), path = join(directory, 'old.sqlite');
+    const directory = await mkdtemp(join(tmpdir(), 'hhpi-codex-migration-')), path = join(directory, 'old.sqlite');
     const old = new SourceEventIndex(path, session), oldHistory = new CodexHistory(old);
     const turn = { id: 'turn-z', status: 'completed' as const, startedAt: 1, completedAt: 12 };
     oldHistory.beginTurn(session, turn);
@@ -137,7 +138,7 @@ const pageImages = (page: SourcePage) => page.entries.flatMap(({ event }) => (ev
 
 /** Seed the actual v2 cache and official immutable storage before making the source file unavailable. */
 async function legacyImageFixture(t: TestContext, includeTool = false, version: 2 | 5 | 6 = 2) {
-    const privateHome = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-image-upgrade-')), directory = join(privateHome, 'source');
+    const privateHome = await mkdtemp(join(tmpdir(), 'hhpi-image-upgrade-')), directory = join(privateHome, 'source');
     const oldPath = join(directory, 'history', `${createHash('sha256').update(session.id).digest('hex')}.v${version}.sqlite`);
     const old = new SourceEventIndex(oldPath, session), lifetime = new AbortController();
     const ready = Promise.withResolvers<void>(); let published = 0;

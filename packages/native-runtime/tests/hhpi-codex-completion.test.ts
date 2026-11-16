@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-native-metadata.ts';
 /** Real DirectCodexAdapter, native history projection and persistent source index.
  * Only native RPC/notifications are controlled; virtual polling never sends a prompt. */
@@ -16,7 +17,7 @@ const finalText = 'Final body accepted after native persistence catches up.';
 
 async function fixture(t: TestContext, older: NativeTurn[]) {
     t.mock.timers.enable({ apis: ['setInterval'] });
-    const privateHome = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-native-completion-'));
+    const privateHome = await mkdtemp(join(tmpdir(), 'hhpi-native-completion-'));
     let native: NativeThread = { id: 'original-thread', cwd: privateHome, createdAt: 1, updatedAt: 2,
         name: 'Synthetic completion source', status: { type: 'idle' } };
     let visibleTurns = older;

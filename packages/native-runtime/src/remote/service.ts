@@ -15,7 +15,8 @@ import { DirectCodexAdapter } from './codex-adapter.ts';
 import { SourceAccessDenied, SourceError } from './errors.ts';
 import { withWorkspaceService } from '../shared/source-access.ts';
 import { createSourceWorkspaceProviders } from '../workspace/source-services.ts';
-import { SOURCE_WORKSPACE_HOST_CONTRACT, type SourceDirectoryRequest, type SourceDirectoryListing, type SourceWorkspaceDescription } from '../workspace/source-api.ts';
+import { SOURCE_WORKSPACE_HOST_CONTRACT, sourceUploadChunk, type SourceUploadChunk, type SourceDirectoryRequest, type SourceDirectoryListing, type SourceWorkspaceDescription } from '../workspace/source-api.ts';
+import { SOURCE_UPLOAD_CHUNK_BYTES } from '../shared/source-upload.ts';
 import { SOURCE_TERMINAL_HOST_CONTRACT } from '../workspace/terminal-api.ts';
 import { SOURCE_NAVIGATION_HOST_CONTRACT } from '../workspace/source-navigation-api.ts';
 import { SourceNavigationService } from '../workspace/source-navigation-service.ts';
@@ -188,6 +189,20 @@ export class SourceWorkspaceService extends TypertRemoteService {
             if (request.target.hostId !== services.binding.target.hostId) throw new SourceAccessDenied();
             if (!services.uploads) throw new RemoteError('workspace-service/unavailable', 'Source uploads are not registered.', { reason: 'unconfigured' });
             return services.uploads.status(request, access);
+        });
+    }
+    @Remote({ name: 'appendUpload', resources: { session: (request: SourceUploadChunk) => [request.target.sessionId as SessionId] } })
+    appendUpload(raw: SourceUploadChunk, signal?: AbortSignal) {
+        if (this.ctx.invocation?.peer.principal.kind !== 'owner') throw new SourceAccessDenied();
+        const request = sourceUploadChunk.parse(raw);
+        return this.execute(request.target.sessionId, 'upload', signal, (services, access) => {
+            if (request.target.hostId !== services.binding.target.hostId) throw new SourceAccessDenied();
+            if (!services.uploads) throw new RemoteError('workspace-service/unavailable', 'Source uploads are not registered.', { reason: 'unconfigured' });
+            const data = Buffer.from(request.data, 'base64');
+            if (data.byteLength > SOURCE_UPLOAD_CHUNK_BYTES || data.toString('base64') !== request.data) {
+                throw new SourceError('INVALID_REQUEST', 'The source upload chunk is not canonical or exceeds its limit.');
+            }
+            return services.uploads.append({ ...request, data }, access);
         });
     }
     @Remote({ name: 'finishUpload', resources: { session: (request: WorkspaceUploadRequest) => [request.target.sessionId as SessionId] } })

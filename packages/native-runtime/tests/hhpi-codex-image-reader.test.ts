@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Real CodexRpc/WebSocket framing; only the remote native filesystem and thread are synthetic. */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -13,7 +14,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwM
 const metadata = { isFile: true, isDirectory: false, isSymlink: false, createdAtMs: 1, modifiedAtMs: 1 };
 
 test('an explicitly local source previews a large saved original without transporting it through Codex RPC', async t => {
-    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-large-preview-');
+    const directory = await mkdtemp(join(tmpdir(), 'hhpi-large-preview-'));
     const path = join(directory, 'original.png');
     const validPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC';
     const original = Buffer.concat([Buffer.from(validPng, 'base64'), Buffer.alloc(17 * 1024 * 1024)]);

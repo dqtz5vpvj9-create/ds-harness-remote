@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Closed temporary threads disappear only after exact native + persistence proof. */
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
@@ -13,7 +14,7 @@ const createdAt = 1794351600
 const clockHex = (createdAt * 1000).toString(16).padStart(12, '0')
 const threadId = (n: number) => `${clockHex.slice(0, 8)}-${clockHex.slice(8)}-7000-8000-${n.toString(16).padStart(12, '0')}`
 async function fixture(t: TestContext) {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-catalog-lifecycle-'), directory = join(home, 'adapter')
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-catalog-lifecycle-')), directory = join(home, 'adapter')
     const db = new DatabaseSync(join(home, 'state_5.sqlite')); db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY)')
     let notify: (value: NativeNotification) => void = () => {}, clock = Date.now()
     const failures = new Set<string>(), loaded = new Set<string>(), calls: string[] = []

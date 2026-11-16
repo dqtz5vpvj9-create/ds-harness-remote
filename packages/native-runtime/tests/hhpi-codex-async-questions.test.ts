@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, writeFile, rm, realpath, lstat } from 'node:fs/promises';
@@ -80,7 +81,7 @@ test('accepted Skip tombstones survive refresh but do not suppress a new identit
 // Real DirectCodexAdapter/receipts/index; only the native RPC and metadata
 // boundaries are synthetic. No model or user source is involved.
 async function skipSource(t: { after(callback: () => Promise<void>): void }) {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-skip-recovery-'), directory = join(home, 'view');
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-skip-recovery-')), directory = join(home, 'view');
     const turn = { id: 'original', status: 'inProgress' as const, startedAt: 1, completedAt: null };
     const item = { id: 'answer', type: 'agentMessage', text: 'Existing readable conversation' };
     const native = { id: 'thread', cwd: home, createdAt: 1, updatedAt: 2, status: { type: 'active', activeFlags: [] } };
@@ -212,7 +213,7 @@ test('typed question/history projections show the official answer payload and re
 });
 
 test('optional question-index failures preserve readable chat and last good pending state, but cannot authorize an answer', async t => {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-question-projection-');
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-question-projection-'));
     const turn = { id: 'original', status: 'inProgress' as const, startedAt: 1, completedAt: null }, item = { id: 'answer', type: 'agentMessage', text: 'Readable existing conversation' };
     const native = { id: 'thread', cwd: home, createdAt: 1, updatedAt: 2, status: { type: 'active', activeFlags: [] } };
     let fail = false, changed = false, notify = (_value: { method: string; params: Record<string, unknown> }) => {};
@@ -249,7 +250,7 @@ test('real native async tool: running steer and idle queue reach the Agent exact
     skip: !process.env.HHPI_CODEX_ASYNC_QUESTION_TEST_COMMAND ? 'Set HHPI_CODEX_ASYNC_QUESTION_TEST_COMMAND to the pinned native executable.' : false,
     timeout: 35_000,
 }, async t => {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-native-async-question-'), socket = join(home, 'native.sock');
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-native-async-question-')), socket = join(home, 'native.sock');
     const model = new SyntheticResponsesModel(); model.automatic = false; model.captureInput = true; await model.start();
     await writeFile(join(home, 'config.toml'), model.config().replace('model = \"hhpi-fixture\"', 'model = \"gpt-6.1-sol\"') + '\n[features]\nplugins = false\ncode_mode_host = true\n');
     const child = spawn(process.env.HHPI_CODEX_ASYNC_QUESTION_TEST_COMMAND!, ['app-server', '--listen', `unix://${socket}`],
@@ -284,7 +285,6 @@ test('real native async tool: running steer and idle queue reach the Agent exact
     assert.equal((await source.operate({ sessionId, operationId: 'ask-async-fixture', kind: 'send', text: 'Ask the isolated async questions.' })).status, 'accepted');
     const asking = await model.next(signal);
     t.diagnostic('native model request received');
-    await writeFile(join('/mnt/cache/data-cache/hhpi-native-questions-20261112', 'isolated-model-input.private.json'), JSON.stringify(asking.input), { mode: 0o600 });
     assert.ok(JSON.stringify(asking.input).includes('request_user_input_async'), 'the real engine must advertise the actual async tool');
     asking.tool('request_user_input_async', { questions: [{ title: 'Choose a route', options: ['Blue', 'Green'] }, { title: 'Explain the route' }] });
     const working = await model.next(signal);
@@ -332,7 +332,7 @@ test('real native idle queue: interruption keeps original items and explicit sel
     skip: !process.env.HHPI_CODEX_QUEUE_START_TEST_COMMAND ? 'Set HHPI_CODEX_QUEUE_START_TEST_COMMAND to the pinned native executable.' : false,
     timeout: 30_000,
 }, async t => {
-    const home = await mkdtemp('/mnt/cache/data-cache/hhpi-native-queue-start-'), socket = join(home, 'native.sock');
+    const home = await mkdtemp(join(tmpdir(), 'hhpi-native-queue-start-')), socket = join(home, 'native.sock');
     const model = new SyntheticResponsesModel(); model.automatic = false; model.captureInput = true; await model.start();
     await writeFile(join(home, 'config.toml'), model.config().replace('model = "hhpi-fixture"', 'model = "gpt-6.1-sol"'));
     const child = spawn(process.env.HHPI_CODEX_QUEUE_START_TEST_COMMAND!, ['app-server', '--listen', `unix://${socket}`],

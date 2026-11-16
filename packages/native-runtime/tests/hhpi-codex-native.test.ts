@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 /** Actual Codex 0.165.0 process; only the external model Responses API is a local fixture. */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -94,7 +95,7 @@ test('native Codex creates once, sends, streams, pages, steers and interrupts wi
     skip: !script && !command ? 'Set HHPI_CODEX_TEST_COMMAND or HHPI_CODEX_TEST_SCRIPT to the pinned native Codex 0.165.0 executable.' : false,
     timeout: 45_000,
 }, async t => {
-    const root = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-native-'));
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-'));
     const model = new SyntheticResponsesModel(); await model.start();
     await writeFile(join(root, 'config.toml'), isolatedNativeConfig(model));
     const config: DirectCodexConfig = { id: 'synthetic', machineId: 'fixture-machine', engine: 'codex', command: script ? process.execPath : command!,
@@ -203,7 +204,7 @@ test('shared Codex source resumes the original persisted thread only after its n
     skip: !script && !command ? 'Set HHPI_CODEX_TEST_COMMAND or HHPI_CODEX_TEST_SCRIPT to the pinned native Codex 0.165.0 executable.' : false,
     timeout: 45_000,
 }, async t => {
-    const root = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-native-handoff-'));
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-handoff-'));
     const model = new SyntheticResponsesModel(); await model.start();
     const sources: DirectCodexAdapter[] = [];
     const native: Array<{ rpc: RecordedNativeRpc; notifications: string[] }> = [];
@@ -335,7 +336,7 @@ test('native queue preserves idle execution, busy queue ownership and exact lost
     timeout: 20_000,
 }, async t => {
     const { SourceError } = await import('../src/remote/errors.ts');
-    const root = await mkdtemp('/mnt/cache/data-cache/hhpi-native-queue-');
+    const root = await mkdtemp(join(tmpdir(), 'hhpi-native-queue-'));
     const model = new SyntheticResponsesModel(); await model.start();
     await writeFile(join(root, 'config.toml'), isolatedNativeConfig(model));
     const config: DirectCodexConfig = { id: 'isolated-queue', machineId: 'fixture', engine: 'codex', command: process.env.HHPI_CODEX_QUEUE_TEST_COMMAND ?? command!,

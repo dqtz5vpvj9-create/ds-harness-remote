@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-native-metadata.ts';
 /** Production native adapter and official image storage; only Codex JSON-RPC is a fixture. */
 import assert from 'node:assert/strict';
@@ -20,7 +21,7 @@ const images = (page: SourcePage): Image[] => page.entries.flatMap(({ event }) =
 });
 
 async function fixture(t: TestContext, items: NativeItem[], options: { turns?: number; readFile?: (path: string, signal: AbortSignal) => Promise<unknown>; beforeThreadRead?: () => Promise<void> } = {}) {
-    const privateHome = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-image-'));
+    const privateHome = await mkdtemp(join(tmpdir(), 'hhpi-image-'));
     const directory = join(privateHome, 'source'), calls: string[] = [], fileReads: string[] = [];
     const thread = { id: 'thread-images', cwd: '/native', createdAt: 1, updatedAt: 2, status: { type: 'idle' } };
     const other = { ...thread, id: 'other-thread' };

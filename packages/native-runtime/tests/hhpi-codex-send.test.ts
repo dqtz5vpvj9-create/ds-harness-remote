@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { nativeMetadataFixture, sliceNativeEntries } from './fixtures/hhpi-native-metadata.ts';
 /** Production adapter, history and durable ledger; only the native RPC boundary is synthetic.
  * Cross-process writer exclusion is covered separately with the pinned native binary. */
@@ -37,7 +38,7 @@ const operation = (operationId: string, kind: SourceOperation['kind'] = 'send'):
 });
 
 async function fixture(t: TestContext, options: FixtureOptions = {}) {
-    const privateHome = await mkdtemp(join('/mnt/cache/data-cache', 'hhpi-codex-send-'));
+    const privateHome = await mkdtemp(join(tmpdir(), 'hhpi-codex-send-'));
     const directory = join(privateHome, 'source');
     const native: NativeThread = { id: identity.nativeId, cwd: privateHome, createdAt: 1, updatedAt: 2,
         name: 'Persisted original thread', status: { type: options.busy ? 'active' : 'idle' } };
