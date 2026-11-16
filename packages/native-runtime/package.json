@@ -1,6 +1,6 @@
 {
   "name": "@dsh-remote/native-runtime",
-  "version": "0.1.0-hhpi.1",
+  "version": "0.1.0-hhpi.2",
   "description": "Source-owned native agent history, operations and DSH projection shared by Remote and HHPI.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -20,15 +20,18 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./*": {
       "types": "./dist/*.d.ts",
-      "import": "./dist/*.js"
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
     },
     "./remote/*.mjs": {
       "types": "./dist/remote/*.d.mts",
-      "import": "./dist/remote/*.mjs"
+      "import": "./dist/remote/*.mjs",
+      "default": "./dist/remote/*.mjs"
     },
     "./package.json": "./package.json"
   },

@@ -615,7 +615,13 @@ export class DirectCodexAdapter implements SourceAdapter {
         await this.prepare(owner, signal); signal?.throwIfAborted();
         // A fixed older page validates its own source revisions. Tail dirtiness
         // stays with the live reader instead of adding a head read to this cursor.
-        if ((owner.dirty || owner.full || owner.rewrite) && !owner.preparing
+        const cachedTail = owner.history!.index.cached<NativeSourceRange>('native-source-tail');
+        const cachedOfflineHead = sourceIsOffline(owner.session) && cachedTail !== undefined
+            && request.before === undefined && request.after === undefined && request.around === undefined;
+        // A temporary native outage must not revoke a previously accepted head.
+        // Recovery remains source-wide; a missing/older page still requires its
+        // own successful read and must never be replaced with this cached tail.
+        if (!cachedOfflineHead && (owner.dirty || owner.full || owner.rewrite) && !owner.preparing
             && (request.before === undefined || owner.full || owner.rewrite)) await this.refresh(owner, owner.full, signal);
         let range = owner.history!.index.cached<NativeSourceRange>('native-source-tail');
         if (request.before !== undefined || request.after !== undefined || request.around !== undefined || range === undefined) {
