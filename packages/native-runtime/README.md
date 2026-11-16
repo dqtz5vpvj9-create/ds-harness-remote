@@ -40,3 +40,16 @@ isolated native-process tests. These tests use a synthetic model service and
 separate native homes; they do not prove real-provider or device acceptance.
 
 See [NOTICE.md](NOTICE.md) for the original source revision and AGPL license.
+
+The `remote/service` entry point registers the authenticated source, workspace,
+upload, navigation and terminal services. Storage paths and receipt formats are
+unchanged. It requires the resource-owned terminal factory from the DSH extension
+SDK. HHPI pins this SDK in `UPSTREAMS.json` (DSH `0.2.2-rc.1`, extension
+`hhpi-dsh-022-20261107.29`); its bundle installer verifies and overlays that SDK
+in the shared runtime closure. The vanilla npm package with the same version
+does not supply this factory. Enabling a local source workspace without it fails
+before source registration, rather than advertising a non-working terminal.
+The core Codex entry point does not require this extension. The port in
+`workspace/terminal-owner` checks the SDK export and contains no PTY execution
+implementation. Host integration tests must run against the pinned SDK, as well
+as checking that a plain SDK is rejected before installation.
