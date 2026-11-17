@@ -61,5 +61,5 @@ export interface LocalTypertGateway extends TypertGatewayLike {
 export interface RemoteTypertGatewayTarget {
   invoke(request: TypertGatewayRequest): Promise<unknown>
   dispatch(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult>
-  open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>>
+  open(endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>): Promise<AsyncIterable<unknown>>
 }

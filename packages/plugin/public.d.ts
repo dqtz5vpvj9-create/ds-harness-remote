@@ -30,11 +30,16 @@ export interface RemoteHostGateway {
     { ok: true; value?: unknown; attachments?: readonly { path: readonly (string | number)[]; bytes: Uint8Array }[] }
     | { ok: false; error: { code: string; message: string; details: Record<string, unknown> } }
   >
-  open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>>
+  open(endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>): Promise<AsyncIterable<unknown>>
 }
 export interface RemoteHostClient {
-  gatewayForHost(hostId: string): RemoteHostGateway
+  authorizeThroughHost(): Promise<void>
+  gatewayForHost(hostId: string, identityKey?: string): RemoteHostGateway
   disconnectHost(hostId: string): Promise<void>
+  webForHost(hostId: string, identityKey: string, signal?: AbortSignal): Promise<{
+    call(input: unknown, signal?: AbortSignal): Promise<unknown>
+    onClose(listener: () => void): () => void
+  }>
 }
 declare module '@deepseek-ai/cordis' {
   interface Context { dshRemoteClient: RemoteHostClient }

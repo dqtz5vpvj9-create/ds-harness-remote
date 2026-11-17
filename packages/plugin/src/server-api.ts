@@ -89,6 +89,24 @@ export class HostServerApi {
 
   bindIdentity(identity: HostIdentity): void { this.identity = identity }
 
+  /** Adopt only the independent Client credential issued by a local owner.
+   * The private key stays in IdentityStore; Host credentials never enter here. */
+  async adoptOwnedClient(identity: HostIdentity, enrollment: {
+    serverUrl: string; deviceId: string; identityKey: string; account: string; tokens: unknown;
+  }): Promise<void> {
+    this.lifetime.signal.throwIfAborted()
+    if (this.role !== 'client' || enrollment.serverUrl !== this.baseUrl
+      || enrollment.deviceId !== identity.deviceId || enrollment.identityKey !== identity.publicKey
+      || !enrollment.account) {
+      throw new ServerApiError('PEER_IDENTITY_MISMATCH', 'Client enrollment does not match this identity and Server.', false)
+    }
+    const tokens = validateTokens(enrollment.tokens)
+    this.bindIdentity(identity)
+    const credentials = await this.saveTokens(identity, tokens, { authorizationMethod: 'owned_device', account: enrollment.account })
+    this.lifetime.signal.throwIfAborted()
+    this.credentials = credentials
+  }
+
   setHarnessVersion(version: string | undefined): void { this.harnessVersion = version }
 
   /** End this runtime's HTTP requests, including authentication and response bodies. */

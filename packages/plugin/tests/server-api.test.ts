@@ -16,6 +16,29 @@ const cleanupContract1 = async () => {
 afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
+  it('adopts only a matching independent Client enrollment without a registration request', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-adopt-client-'))
+    directories.push(directory)
+    const store = new ServerCredentialStore(directory), identity = hostIdentity()
+    const network = vi.fn<typeof fetch>()
+    const api = new ClientServerApi('https://remote.example', store, network)
+    const enrollment = { serverUrl: api.baseUrl, deviceId: identity.deviceId, identityKey: identity.publicKey,
+      account: 'owner@example.com', tokens: tokens() }
+    try {
+      for (const changed of [{ serverUrl: 'https://other.example' }, { deviceId: 'other' },
+        { identityKey: 'wrong' }, { account: '' }]) {
+        await expect(api.adoptOwnedClient(identity, { ...enrollment, ...changed })).rejects
+          .toMatchObject({ code: 'PEER_IDENTITY_MISMATCH' })
+      }
+      expect(await store.load(api.baseUrl, identity.deviceId)).toBeUndefined()
+      await api.adoptOwnedClient(identity, enrollment)
+      expect(await api.authenticate(identity)).toMatchObject({ ...enrollment.tokens, authorizationMethod: 'owned_device', account: enrollment.account })
+      expect(network).not.toHaveBeenCalled()
+      api.close()
+      await expect(api.adoptOwnedClient(identity, enrollment)).rejects.toThrow()
+    } finally { api.close() }
+  })
+
   it('enrolls a separate Client without exposing or replacing Host credentials and never retries registration', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-owned-client-'))
     directories.push(directory)

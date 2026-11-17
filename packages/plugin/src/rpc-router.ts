@@ -1,4 +1,5 @@
 import type { LanUploadHost } from './lan-upload.js'
+import type { RemoteWebSource } from './web-carrier-contract.js'
 import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
 import {
   BINARY_UPLOAD_CAPABILITY,
@@ -41,6 +42,7 @@ const compactionOperationSchema = z.object({
 }).strict()
 const apiMethods = new Set([
   'harness.transport.describe',
+  'harness.web.call',
   'remote.history.configure',
   'harness.remote.call',
   'harness.remote.transfer.open',
@@ -122,9 +124,13 @@ export class RpcRouter {
     private readonly compaction?: RemoteCompactionRoute,
     private readonly lanUpload?: LanUploadHost,
     private readonly transportUpgrade?: TransportUpgradeHost,
+    private readonly webSourceFactory?: () => RemoteWebSource | undefined,
   ) {}
 
+  private webSource?: RemoteWebSource
+
   async closePeerStreams(): Promise<void> {
+    this.webSource?.close()
     this.loopback?.closeAll()
     await Promise.all([
       this.harnessRemote?.closeAll(),
@@ -226,6 +232,11 @@ export class RpcRouter {
       case 'harness.remote.compaction.cancel': {
         const route = this.requireCompaction()
         return route.operations.cancel(compactionOperationSchema.parse(params), route.owner)
+      }
+      case 'harness.web.call': {
+        this.webSource ??= this.webSourceFactory?.()
+        if (!this.webSource) throw new RpcError('FEATURE_NOT_SUPPORTED', 'This Host has no Web source carrier.')
+        return this.webSource.call(params)
       }
       case 'harness.remote.call': return this.requireRemoteGateway().call(params)
       case 'harness.remote.transfer.open': return this.requireRemoteGateway().openTransfer(params)

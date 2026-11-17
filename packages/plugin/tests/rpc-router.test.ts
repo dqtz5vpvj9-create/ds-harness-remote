@@ -9,6 +9,20 @@ import type { PluginRouteBridge } from '../src/plugin-route-bridge.js'
 import type { CodexPeerBridge } from '../src/codex/peer-bridge.js'
 
 describe('RpcRouter', () => {
+  it('allows Web frames only with a registered local source and closes it with the encrypted peer', async () => {
+    const request = createRpcRequest('harness.web.call', { op: 'read', id: 'browser' })
+    const denied = await new RpcRouter().handle(request)
+    expect(denied).toMatchObject({ type: 'rpc.error', payload: { code: 'FEATURE_NOT_SUPPORTED' } })
+    const call = vi.fn(async () => ({ sequence: 1, data: '', final: true })), close = vi.fn()
+    const factory = vi.fn(() => ({ call, close }))
+    const router = new RpcRouter(undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, factory)
+    expect(await router.handle(request)).toMatchObject({ type: 'rpc.response', payload: { result: { sequence: 1 } } })
+    expect(call).toHaveBeenCalledWith({ op: 'read', id: 'browser' })
+    expect(factory).toHaveBeenCalledOnce()
+    await router.closePeerStreams()
+    expect(close).toHaveBeenCalledOnce()
+  })
   it('rejects every retired ApiProxy entry point without invoking the Typert bridge', async () => {
     const call = vi.fn()
     const router = createRouter({ call })

@@ -10,3 +10,7 @@ comply with the AGPL terms.
 Native thread identifiers, on-disk receipt formats, attachment references and
 source-session IDs are retained for compatibility. Extraction does not move or
 replay native operations.
+
+The Web carrier in `src/web/` also incorporates HHPI's bounded HTTP/WebSocket
+forwarder from revision `3ed29f276`. It retains AGPL-3.0-only licensing. Remote
+supplies the authenticated encrypted connection; no native execution is moved.

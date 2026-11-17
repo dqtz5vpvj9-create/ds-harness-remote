@@ -123,6 +123,12 @@ it('keeps host-bound source operations isolated through selection, lost receipts
     const a = runtime.gatewayForHost('a'), b = runtime.gatewayForHost('b')
     const read = { namespace: 'hhpi', method: 'read', args: { request: { sessionId: 'same-native-id' } } }
     expect(await Promise.all([a.invoke(read), b.invoke(read)])).toEqual([{ host: 'a' }, { host: 'b' }])
+    const pinned = runtime.gatewayForHost('a', keys.get('a')!.publicKey)
+    expect(await pinned.invoke(read)).toEqual({ host: 'a' })
+    const beforeMismatch = calls.length
+    await expect(runtime.gatewayForHost('a', keys.get('b')!.publicKey).invoke(read))
+      .rejects.toMatchObject({ code: 'PEER_IDENTITY_MISMATCH' })
+    expect(calls).toHaveLength(beforeMismatch)
     expect(sockets).toHaveLength(1)
     expect(links.size).toBe(2)
     await runtime.setMode('remote', 'b')
@@ -130,6 +136,7 @@ it('keeps host-bound source operations isolated through selection, lost receipts
     await expect(a.invoke({ namespace: 'hhpi', method: 'operate', args: { request: { operationId: 'stable-id' } } })).rejects.toThrow()
     expect(await b.invoke(read)).toEqual({ host: 'b' })
     await vi.waitFor(async () => expect(await a.invoke(read)).toEqual({ host: 'a' }), { timeout: 2500 })
+    expect(await pinned.invoke(read)).toEqual({ host: 'a' })
     expect(await a.invoke({ namespace: 'hhpi', method: 'receipt', args: { request: { operationId: 'stable-id' } } })).toEqual({ status: 'accepted' })
     expect(calls.filter(call => call.endpoint === 'hhpi/operate')).toEqual([{ host: 'a', endpoint: 'hhpi/operate', operationId: 'stable-id' }])
     expect(sockets).toHaveLength(1)
@@ -151,3 +158,29 @@ it('keeps host-bound source operations isolated through selection, lost receipts
   expect(links.size).toBe(0)
   expect(sockets[0]!.readyState).toBe(3)
 }, 10000)
+
+it('shares owner enrollment and rejects late credentials after runtime disposal without retrying an unknown registration', async () => {
+  const identity = { schemaVersion: 1 as const, deviceId: 'client', name: 'Client', fingerprint: 'CLIENT',
+    ...generateKeyPair(new Uint8Array(32).fill(72)) }
+  let reply!: (value: { serverUrl: string; deviceId: string; identityKey: string; account: string; tokens: unknown }) => void
+  const registration = new Promise<Parameters<typeof reply>[0]>(resolve => { reply = resolve })
+  const registerOwnedClient = vi.fn(() => registration), adoptOwnedClient = vi.fn(async () => {})
+  const server = { bindIdentity() {}, hasStoredAuthorization: async () => false, adoptOwnedClient, close() {} }
+  const host = { registerOwnedClient, hostStatus: () => ({ configured: true, authorized: true }) }
+  const runtime = new ClientModeRuntime(resolveConfig({ multiHost: true, hostControl: { enabled: false } }),
+    { loadOrCreate: async () => identity } as unknown as IdentityStore,
+    server as unknown as ClientServerApi, { invoke: async () => ({}) },
+    { info() {}, warn() {}, debug() {}, error() {} } as unknown as SafeLogger,
+    host as unknown as import('../src/client-runtime-contract.js').HostAuthorizationControl)
+  await runtime.start()
+  const first = runtime.authorizeThroughHost(), second = runtime.authorizeThroughHost()
+  const rejected = Promise.all([expect(first).rejects.toMatchObject({ code: 'CANCELLED' }),
+    expect(second).rejects.toMatchObject({ code: 'CANCELLED' })])
+  await vi.waitFor(() => expect(registerOwnedClient).toHaveBeenCalledOnce())
+  await runtime.close()
+  reply({ serverUrl: 'https://remote.example', deviceId: identity.deviceId, identityKey: identity.publicKey,
+    account: 'owner', tokens: {} })
+  await rejected
+  expect(adoptOwnedClient).not.toHaveBeenCalled()
+  expect(registerOwnedClient).toHaveBeenCalledOnce()
+})

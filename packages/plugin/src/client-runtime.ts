@@ -1,4 +1,8 @@
 import { uploadLocalMentions } from './local-mention-upload.js'
+import { platform } from 'node:os'
+import { openRemoteTerminal } from './terminal-carrier-compat.js'
+import { PLUGIN_VERSION } from './version.js'
+import type { RemoteWebLink } from './web-carrier-contract.js'
 import type { ControlResult } from './control-result.js'
 import { AgentAcpClient, CodexRemoteClient } from '@dsh-remote/client-core'
 import type { PluginRouteCallResult } from '@dsh-remote/protocol'
@@ -412,6 +416,28 @@ export class ClientModeRuntime {
     this.clientAuthRequired = false
     this.logger.info('Client account authorized')
     return authorization
+  }
+
+  private ownerEnrollment?: Promise<void>
+
+  /** Called by an authenticated embedding owner, not by a remote peer. */
+  async authorizeThroughHost(): Promise<void> {
+    this.assertHostAuthorizationForDeviceDiscovery()
+    if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
+    if (await this.server.hasStoredAuthorization()) return
+    const identity = this.requireIdentity()
+    // Share the single registration attempt. An unknown result is not retried
+    // automatically: the server may already have committed its credential.
+    this.ownerEnrollment ??= (async () => {
+      const register = this.host?.registerOwnedClient?.bind(this.host)
+      if (!register) throw new ClientModeError('ACCOUNT_AUTH_REQUIRED', 'An account-owned Host is required.')
+      const enrollment = await register({ deviceId: identity.deviceId, name: identity.name,
+        role: 'client', platform: platform(), identityKey: identity.publicKey, clientVersion: PLUGIN_VERSION })
+      if (this.closed || this.requireIdentity() !== identity) throw new ClientModeError('CANCELLED', 'Client identity changed during enrollment.')
+      await this.server.adoptOwnedClient(identity, enrollment)
+      this.clientAuthRequired = false
+    })()
+    return this.ownerEnrollment
   }
 
   async startClientOAuthQrLogin(provider: OAuthProvider): Promise<unknown> {
@@ -921,19 +947,31 @@ export class ClientModeRuntime {
 
   /** Source/session owners retain this gateway. UI selection cannot retarget
    * any request; transient reconnect replaces only this Host's connection. */
-  gatewayForHost(hostId: string): RemoteTypertGatewayTarget {
+  gatewayForHost(hostId: string, identityKey?: string): RemoteTypertGatewayTarget {
     if (!this.hostConnections) throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'Multi-host mode is not enabled.')
     const current = async (signal?: AbortSignal): Promise<RemoteTypertGateway> => {
       if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
       this.assertHostAuthorizationForDeviceDiscovery()
       const remote = await this.hostConnections!.get(hostId, signal)
       this.assertHostAuthorizationForDeviceDiscovery()
+      if (identityKey !== undefined && remote.target.publicKey !== identityKey) {
+        throw new ClientModeError('PEER_IDENTITY_MISMATCH', 'The connected Host does not match the configured identity.')
+      }
       return this.remoteTypertGateway(remote)
     }
     return {
       invoke: async request => (await current(request.signal)).invoke(request),
       dispatch: async (endpoint, payload, signal) => (await current(signal)).dispatch(endpoint, payload, signal),
-      open: async (endpoint, payload, signal) => (await current(signal)).open(endpoint, payload, signal),
+      open: async (endpoint, payload, signal, uplink) => {
+        // Capture this connection once for the complete duplex attachment.
+        // Reconnection must never deliver old terminal inputs to a new link.
+        const target = await current(signal)
+        if (uplink && (endpoint === 'terminal/attach' || endpoint === 'sourceTerminal/attach')) {
+          return openRemoteTerminal(target, payload, signal, uplink, endpoint === 'sourceTerminal/attach' ? 'sourceTerminal' : 'terminal')
+        }
+        if (uplink) throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'This Remote stream does not support client input.')
+        return target.open(endpoint, payload, signal)
+      },
     }
   }
 
@@ -941,6 +979,18 @@ export class ClientModeRuntime {
     if (!this.hostConnections) throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'Multi-host mode is not enabled.')
     if (this.recoverable?.target.deviceId === hostId) this.recoverable = undefined
     await this.hostConnections.release(hostId)
+  }
+
+  /** Retain the authenticated physical link. A replacement link requires a new
+   * Web channel; pending writes on the old one are never retried. */
+  async webForHost(hostId: string, identityKey: string, signal?: AbortSignal): Promise<RemoteWebLink> {
+    if (!this.hostConnections || this.closed) throw new ClientModeError('CANCELLED', 'Multi-host runtime unavailable.')
+    this.assertHostAuthorizationForDeviceDiscovery()
+    const remote = await this.hostConnections.get(hostId, signal)
+    this.assertHostAuthorizationForDeviceDiscovery()
+    if (remote.target.publicKey !== identityKey) throw new ClientModeError('PEER_IDENTITY_MISMATCH', 'Host identity changed.')
+    return { call: (input, signal) => remote.client.rpc('harness.web.call', input, signal),
+      onClose: listener => remote.client.onClose(listener) }
   }
 
   private selectRemoteTarget(remote: ConnectedRemote): void {

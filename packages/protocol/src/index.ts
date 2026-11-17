@@ -200,6 +200,7 @@ export const rpcMethods = [
   'harness.remote.compaction.status',
   'harness.remote.compaction.cancel',
   'loopback.call',
+  'harness.web.call',
   'fileviewer.call',
   'codex.app.call',
   'codex.app.respond',

@@ -4,6 +4,7 @@ import type { HostPairingView } from './pairing-contract.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
 import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
+import type { RemoteWebSource } from './web-carrier-contract.js'
 import { TerminalPolicy } from './terminal-policy.js'
 import { clientDeviceDescriptorSchema, createEvent, REMOTE_SESSION_EVENTS_CAPABILITY, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
@@ -216,6 +217,7 @@ export class HostPluginRuntime {
         },
         lanUpload,
         context.createTransportUpgradeHost?.(send),
+        () => this.webSourceFactory?.(),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -449,6 +451,24 @@ export class HostPluginRuntime {
     }
   }
 
+  private webSourceFactory?: () => RemoteWebSource
+  /** Register the official source listener through its authenticated local owner. */
+  registerWebSource(factory: () => RemoteWebSource): () => void {
+    if (this.webSourceFactory) throw new Error('A Web source is already registered')
+    const active = new Set<RemoteWebSource>()
+    const create = () => {
+      const source = factory()
+      const wrapped: RemoteWebSource = { call: input => source.call(input), close: () => { active.delete(wrapped); source.close() } }
+      active.add(wrapped)
+      return wrapped
+    }
+    this.webSourceFactory = create
+    return () => {
+      if (this.webSourceFactory === create) this.webSourceFactory = undefined
+      for (const source of active) source.close()
+    }
+  }
+
   async authorizeHostWithAccount(email: string, password: string): Promise<DeviceAuthorization> {
     if (this.serverApi === undefined) {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before signing in.', false)
@@ -598,6 +618,7 @@ export class HostPluginRuntime {
   private hostCapabilities(): string[] {
     const capabilities: string[] = ['workspace.upload.v1']
     if (this.loopbackPorts.length > 0) capabilities.push('loopback.http-ws.v1')
+    if (this.webSourceFactory) capabilities.push('harness.web.v1')
     if (this.localGateway?.supportsCarrier === true) {
       capabilities.push(
         harnessSessionGeneration(this.harnessVersion) === 'v3' ? 'harness.remote.v3' : 'harness.remote.v1',

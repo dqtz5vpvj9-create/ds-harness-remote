@@ -117,6 +117,9 @@ export interface HostConnectionHandle {
 }
 
 export interface HostAuthorizationControl {
+  registerOwnedClient?(descriptor: unknown): Promise<{
+    serverUrl: string; deviceId: string; identityKey: string; account: string; tokens: unknown;
+  }>
   setAgentBackends?(config: ResolvedConfig): Promise<void>
   setTerminalEnabled?(enabled: boolean): void
   setLoopbackPorts?(ports: readonly number[]): void

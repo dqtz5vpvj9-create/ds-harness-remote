@@ -2270,3 +2270,34 @@ local UI retains other Host links; `disconnectHost` releases only its target.
 Logout/disposal closes all links and the shared account control connection.
 This is a transport/service integration point; it does not itself migrate an
 HHPI source, replace its execution owner, or declare Web/Go acceptance.
+
+### Owner-composed DSH Web carrier (`harness.web.v1`)
+
+A local owner integration may explicitly register the official DSH listener with
+`HostPluginRuntime.registerWebSource`. Only then does the Host advertise
+`harness.web.v1`. This transports the existing authenticated DSH Web application,
+including its assets, HTTP streams, uploads and duplex WebSockets, through the
+same Noise connection. It is not an arbitrary TCP proxy: the source is a fixed
+loopback DSH listener and its official authentication callback. Source credentials
+remain on that machine. Browser credentials and forwarded authority headers are
+stripped; the original DSH owner and native method authorization remain in force.
+
+The single RPC `harness.web.call` accepts `{ op, id, packet? }`. `open` creates a
+channel and returns its runtime identity; `read` retrieves one bounded packet;
+`write` accepts one packet; `close` releases the channel. A channel is scoped to
+one authenticated physical connection, with at most eight channels per peer.
+Packets carry `{ sequence, data, final }`, with strictly increasing per-direction
+sequence numbers and at most 128 KiB of decoded bytes. `data` is base64. A final
+packet completes one opaque Web frame; an empty final packet is a heartbeat.
+Read is single-consumer and returns a heartbeat after 15 seconds. Fragmentation
+preserves the existing 32 MiB WebSocket message and 48 MiB frame/buffer limits
+without increasing the encrypted Remote message limit. HTTP bodies are streamed.
+
+The shared implementation, frame validation and source forwarder live in
+`packages/native-runtime/src/web/` under their retained AGPL license. Data frames
+are acknowledged only after their destination consumes them, preserving bounded
+backpressure. Disconnect closes the physical channel and rejects pending writes;
+reconnect creates a new channel and does not replay any prior input. Clients pin
+the Host identity key and verify the distribution runtime identity before exposing
+the channel to a Web view. A configured Remote route never falls back to another
+source or to an older Runner when its connection fails.
