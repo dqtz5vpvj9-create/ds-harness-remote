@@ -655,7 +655,7 @@ describe('AcpVirtualHarness', () => {
               )
             expect(await history()).toMatchObject({ ok: true, value: { records: [] } })
             client.loadSessionHistory.mockRejectedValueOnce(new Error('remote unavailable'))
-            expect(await history()).toMatchObject({ ok: true, value: { records: [] } })
+            expect(await history()).toMatchObject({ ok: false, error: { message: 'remote unavailable' } })
             expect(client.loadSessionHistory).toHaveBeenCalledWith('acp:remote-only', 'antigravity')
           } finally {
             await target.close()

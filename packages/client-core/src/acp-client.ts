@@ -37,7 +37,7 @@ export interface AcpStream {
 
 /** Shared Web/Android client for the generic Agent ACP domain in Remote. */
 export class AgentAcpClient {
-  constructor(private readonly core: RemoteClientCore, private readonly capabilities: readonly string[] = []) {}
+  constructor(private readonly core: Pick<RemoteClientCore, 'rpc' | 'onEvent'>, private readonly capabilities: readonly string[] = []) {}
 
   supportsArchive(backend: string): boolean {
     return backend === 'opencode' && this.capabilities.includes('agent.acp.opencode.archive.v1')

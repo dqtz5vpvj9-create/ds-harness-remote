@@ -21,7 +21,7 @@ export interface CodexEvents {
 export interface CodexEventsRequest { sourceId: string; generation?: number; after?: number }
 export interface CodexReply { sourceId: string; operationId: string; requestId: string; result: unknown }
 export interface CodexCapabilities {
-    protocolVersion: '0.165.0'; runtime: string;
+    protocolVersion: string; runtime: string;
     methods: Record<string, 'read' | 'write'>; unavailable: Record<string, string>;
 }
 

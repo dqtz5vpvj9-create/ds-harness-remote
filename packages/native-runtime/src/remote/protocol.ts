@@ -33,6 +33,7 @@ export interface SourceSession extends SourceIdentity {
     connection?: { state: 'online' | 'offline'; observedAt: number } | undefined;
     capabilities: SourceCapabilities; pendingRequests: SourceApproval[];
     codex?: { model: string | null; reasoningEffort: string | null; parentThreadId: string | null; agentNickname: string | null; settings?: Record<string, unknown> | undefined } | undefined;
+    agent?: { provider: string; model: string; reasoningEffort?: string | undefined } | undefined;
     /** Exact pre-cutover resource, advertised only by its verified native owner. */
     legacyOrigin?: { hubId: string; sessionId: string } | undefined;
 }
@@ -76,7 +77,7 @@ export interface SourceCatalog { protocol: 1; legacyHapi: boolean; storageScope?
 /** Each adapter owns its native protocol and operations. It never creates a DSH Agent. */
 export interface SourceAdapter {
     readonly id: string; readonly machineId: string; readonly engine: string;
-    readonly nativeAccess?: CodexAccessBridge;
+    readonly nativeAccess?: Pick<CodexAccessBridge, 'capabilities' | 'call' | 'reply' | 'readEvents'>;
     upload?(request: SourceUploadRequest, signal?: AbortSignal): Promise<FileUploadValue>;
     list(signal?: AbortSignal): Promise<SourceSession[]>;
     /** Resolve an authorized original identity without waiting for the complete directory. */
@@ -104,4 +105,5 @@ export interface DirectCodexConfig {
     historyMetadata?: { command: string; args?: string[] };
 }
 /** Native DSH uses its official paired Host, without an HHPI adapter. */
-export type DirectSourceConfig = DirectCodexConfig;
+export interface DirectAcpConfig { id: string; machineId: string; engine: 'antigravity'; cwd?: string }
+export type DirectSourceConfig = DirectCodexConfig | DirectAcpConfig;

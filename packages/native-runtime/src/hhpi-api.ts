@@ -49,6 +49,7 @@ const session: z.ZodType<SourceSession> = z.strictObject({ id, sourceId: id, mac
     connection: z.strictObject({ state: z.enum(['online', 'offline']), observedAt: z.number().finite() }).optional(),
     capabilities: z.strictObject({ send: z.boolean(), steer: z.boolean(), cancel: z.boolean(), approve: z.boolean(), files: z.boolean(), images: z.boolean().optional() }), pendingRequests: z.array(approval),
     codex: z.strictObject({ model: z.string().nullable(), reasoningEffort: z.string().nullable(), parentThreadId: z.string().nullable(), agentNickname: z.string().nullable(), settings: z.record(z.string(), z.unknown()).optional() }).optional(),
+    agent: z.strictObject({ provider: id, model: id, reasoningEffort: z.string().optional() }).optional(),
     legacyOrigin: z.strictObject({ hubId: id, sessionId: id }).optional() });
 /** The same boundary contract validates optional authenticated browser history snapshots. */
 export const sourceSessionSchema = session;
@@ -76,7 +77,7 @@ const inputs = {
     create: z.strictObject({ sourceId: id, operationId: z.string().min(1).max(256), cwd: z.string().min(1).max(8192).optional() }), resource: z.strictObject({ sessionId: id, path: z.string().min(1).max(8192) }) };
 const outputs = {
     upload: z.strictObject({ receiptId: z.uuid(), file: z.strictObject({ attachmentId: z.uuid(), name: z.string(), bytes: z.number().int().nonnegative() }) }),
-    nativeCapabilities: z.strictObject({ protocolVersion: z.literal('0.165.0'), runtime: z.string(), methods: z.record(z.string(), z.enum(['read', 'write'])), unavailable: z.record(z.string(), z.string()) }),
+    nativeCapabilities: z.strictObject({ protocolVersion: z.string().min(1), runtime: z.string(), methods: z.record(z.string(), z.enum(['read', 'write'])), unavailable: z.record(z.string(), z.string()) }),
     nativeCall: nativeResult, nativeReceipt: nativeResult, nativeReply: nativeResult,
     nativeEvents: z.strictObject({ generation: seq, cursor: seq, reset: z.boolean(), events: z.array(z.strictObject({ sequence: seq, generation: seq, method: z.string(), params: z.record(z.string(), z.unknown()) })), pending: z.array(z.strictObject({ id, generation: seq, method: z.string(), params: z.record(z.string(), z.unknown()) })) }),
     catalog: z.strictObject({ protocol: z.literal(1), legacyHapi: z.boolean(), storageScope: id.optional(), sessions: z.array(session), sources: z.array(z.strictObject({ id, machineId: id, engine: z.string(), online: z.boolean(), create: z.boolean() })) }),

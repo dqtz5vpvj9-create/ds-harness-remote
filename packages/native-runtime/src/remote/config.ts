@@ -13,12 +13,15 @@ const codex = z.strictObject({
 /** Only an operator-authored private config can select executables or source endpoints. */
 export function parseSources(value: unknown): DirectSourceConfig[] {
     if (Array.isArray(value) && value.some(source => source && typeof source === 'object' && source.engine === 'dsh')) throw new Error('The HAPI-owned DSH source has been retired. Recover its exact session aliases offline and pair the original DSH Host; do not create a replacement Agent.');
-    const sources = z.array(codex).max(32).parse(value);
+    const sources = z.array(z.discriminatedUnion('engine', [codex,
+        z.strictObject({ id: label, machineId: label, engine: z.literal('antigravity'), cwd: nonempty.optional() })])).max(32).parse(value);
     const ids = new Set<string>();
     for (const source of sources) {
         if (ids.has(source.id)) throw new Error('Source IDs must be unique on one Host');
         ids.add(source.id);
-        if (source.cwd !== undefined && !isAbsolute(source.cwd) || source.codexHome !== undefined && !isAbsolute(source.codexHome)) throw new Error('Source cwd and codexHome must be absolute');
+        if (source.cwd !== undefined && !isAbsolute(source.cwd)) throw new Error('Source cwd must be absolute');
+        if (source.engine !== 'codex') continue;
+        if (source.codexHome !== undefined && !isAbsolute(source.codexHome)) throw new Error('Source codexHome must be absolute');
         if (source.endpoint) {
             const url = new URL(source.endpoint);
             // Loopback native app-server only. Remote machine access is the
@@ -41,7 +44,7 @@ export function parseSourceWorkspaces(value: unknown, sources: readonly DirectSo
         if (ids.has(entry.sourceId)) throw new Error('Each source has one workspace provider');
         ids.add(entry.sourceId);
         const source = sources.find(source => source.id === entry.sourceId);
-        if (!source || source.engine !== 'codex') throw new Error('Local source services require an explicitly configured Codex source');
+        if (!source) throw new Error('Local source services require an explicitly configured native source');
     }
     return entries;
 }

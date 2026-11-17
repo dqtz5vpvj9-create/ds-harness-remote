@@ -172,6 +172,49 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return [...this.workspaceById.values()]
   }
 
+  /** Source-side consumers share this projection with the official Remote UI.
+   * Discovery never creates a session or selects a global current workspace. */
+  async sourceCatalog() {
+    if (!this.client.listWorkspaces) throw new Error('The backend has no workspace catalog.')
+    for (const item of await this.client.listWorkspaces(this.backend)) {
+      const workspace = createAcpWorkspaceView(item.path, this.backend)
+      if (!this.workspaceById.has(workspace.workspaceId)) this.workspaceById.set(workspace.workspaceId, workspace)
+      await this.discoverAndAttachSessions(this.workspaceById.get(workspace.workspaceId)!, 10000)
+    }
+    return [...this.sessions.values()].map(session => this.sourceMetadata(session))
+  }
+
+  private sourceMetadata(session: AcpSessionState) {
+    return { nativeId: session.acpSessionId, cwd: session.cwd, title: session.title ?? this.backendLabel(),
+      updatedAt: session.updatedAt, running: session.running, selection: this.selectedModels.get(session.sessionId) }
+  }
+
+  async sourceSnapshot(nativeId: string) {
+    const id = `${sessionPrefix(this.backend)}${nativeId}`
+    if (!this.sessions.has(id)) await this.sourceCatalog()
+    const session = this.sessions.get(id)
+    if (!session) throw new Error('The native session was not found in this backend catalog.')
+    await this.hydrateSession(session)
+    if (session.staleHistory) throw new Error('Authoritative native history is unavailable; the retained history has not been replaced.')
+    return { ...this.sourceMetadata(session), entries: structuredClone(session.events) }
+  }
+
+  async sourceCreate(cwd: string, signal: AbortSignal) {
+    const result = record(await this.createSession({ cwd }, signal))
+    if (result.ok !== true) throw new Error(String(record(result.error).message ?? 'Native session creation failed.'))
+    const id = string(record(result.value).sessionId)
+    if (!id) throw new Error('Native session creation did not return an identity.')
+    return this.sourceSnapshot(nativeAcpId(id, this.backend))
+  }
+
+  /** Explicit native identity: never route controls via preferredSessionId(). */
+  async sourceCall(nativeId: string, endpoint: string, args: JsonRecord, signal: AbortSignal) {
+    await this.sourceSnapshot(nativeId)
+    const result = await this.dispatch(endpoint, { args: { ...args, sessionId: `${sessionPrefix(this.backend)}${nativeId}` } }, signal)
+    if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code })
+    return result.value
+  }
+
   private backendLabel(): string {
     return acpBackendLabel(this.backend)
   }
@@ -611,8 +654,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         }
         // A failed history read is not a successful empty baseline; do not continue
         // a restored conversation until its authoritative history is available.
-        if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode' || this.backend === 'hermes') throw error
-        // Preserve legacy AGY history availability behavior.
+        throw error
       }
     }
     if (events.length > 0) {
@@ -798,17 +840,17 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return session
   }
 
-  private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView): Promise<void> {
+  private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView, limit = 30): Promise<void> {
     if (this.backend === 'cursor') return
     const previousTitles = new Map([...this.sessions].map(([id, session]) => [id, session.title]))
     try {
       let discovered: Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }> = []
       if (this.client.listSessions !== undefined) {
         try {
-          discovered = await this.client.listSessions(workspace.path, this.backend, 30)
+          discovered = await this.client.listSessions(workspace.path, this.backend, limit)
+          if (limit === 10000 && discovered.length >= limit) throw new Error('Native catalog exceeds the complete source catalog limit.')
         } catch (error) {
-          if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'hermes') throw error
-          // Preserve legacy AGY catalog availability behavior.
+          throw error
         }
       }
       for (const item of discovered) {
@@ -819,7 +861,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         const existing = this.sessions.get(sessionId)
         if (existing !== undefined) {
           // Refresh activity from the Host without moving a live turn backwards.
-          if (Number.isFinite(item.updatedAt)) existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt)
+          if (Number.isFinite(item.updatedAt)) {
+            if (item.updatedAt > existing.updatedAt && !existing.running) existing.staleHistory = true
+            existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt)
+          }
           if (!previousTitles.has(sessionId) || existing.title === previousTitles.get(sessionId)) {
             this.titles.applyNative(existing, item.title)
           }
@@ -832,8 +877,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       this.sortWorkspaceSessions(workspace)
       workspace.updatedAt = new Date().toISOString()
     } catch (error) {
-      if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'hermes') throw error
-      // Preserve legacy AGY catalog availability behavior.
+      throw error
     }
   }
 

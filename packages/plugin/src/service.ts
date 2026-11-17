@@ -534,6 +534,16 @@ export class HostPluginRuntime {
     return this.acp.status()
   }
 
+  createAcpSourcePort(backend: 'antigravity') {
+    const identity = this.currentIdentity()
+    return createAcpSourcePort(publish => {
+      const peer = this.acp.createPeer({ connectionId: `source:${identity.deviceId}:${crypto.randomUUID()}`,
+        peerDeviceId: identity.deviceId }, publish)
+      if (!peer) throw new RpcError('ACP_UNAVAILABLE', 'The native Agent backend is unavailable.')
+      return peer
+    }, { deviceId: identity.deviceId, name: this.config.deviceName }, backend)
+  }
+
   acpCall(input: unknown): Promise<unknown> {
     return this.requireLocalAcpPeer().call(input)
   }
@@ -769,3 +779,4 @@ function shortId(value: string): string { return value.length <= 12 ? value : `$
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+import { createAcpSourcePort } from './acp/source-port.js'

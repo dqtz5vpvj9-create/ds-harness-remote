@@ -12,6 +12,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session';
 import { HHPI_REMOTE } from '../hhpi-api.ts';
 import { SourceGateway, type SourceAccess } from './gateway.ts';
 import { DirectCodexAdapter } from './codex-adapter.ts';
+import { DirectAcpAdapter, type AcpSourcePort } from './acp-adapter.ts';
 import { SourceAccessDenied, SourceError } from './errors.ts';
 import { withWorkspaceService } from '../shared/source-access.ts';
 import { createSourceWorkspaceProviders } from '../workspace/source-services.ts';
@@ -322,7 +323,12 @@ export function installSources(ctx: Context, sources: readonly DirectSourceConfi
     const uploadReceipts = new Map<string, string>();
     const adapters = sources.map(source => {
         const cache = join(directory, createHash('sha256').update(JSON.stringify([source.machineId, source.id, source.engine])).digest('hex'));
-        if (source.engine === 'codex') uploadReceipts.set(source.id, join(cache, 'uploads'));
+        uploadReceipts.set(source.id, join(cache, 'uploads'));
+        if (source.engine === 'antigravity') return new DirectAcpAdapter(source, cache, () => {
+            const runtime = (ctx as unknown as { dshRemote?: { createAcpSourcePort(backend: 'antigravity'): AcpSourcePort } }).dshRemote;
+            if (!runtime) throw new SourceError('TARGET_UNAVAILABLE', 'The Remote Agent service is unavailable on this Host.');
+            return runtime.createAcpSourcePort('antigravity');
+        }, workspaces.some(entry => entry.sourceId === source.id));
         return new DirectCodexAdapter(source, cache, { localImageFiles: workspaces.some(entry => entry.sourceId === source.id && entry.provider === 'local-system') });
     });
     const gateway = new SourceGateway(adapters, { refreshMs: 15_000 });

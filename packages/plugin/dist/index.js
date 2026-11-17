@@ -70988,6 +70988,50 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     for (const workspace2 of this.workspaceById.values()) this.sortWorkspaceSessions(workspace2);
     return [...this.workspaceById.values()];
   }
+  /** Source-side consumers share this projection with the official Remote UI.
+   * Discovery never creates a session or selects a global current workspace. */
+  async sourceCatalog() {
+    if (!this.client.listWorkspaces) throw new Error("The backend has no workspace catalog.");
+    for (const item of await this.client.listWorkspaces(this.backend)) {
+      const workspace2 = createAcpWorkspaceView(item.path, this.backend);
+      if (!this.workspaceById.has(workspace2.workspaceId)) this.workspaceById.set(workspace2.workspaceId, workspace2);
+      await this.discoverAndAttachSessions(this.workspaceById.get(workspace2.workspaceId), 1e4);
+    }
+    return [...this.sessions.values()].map((session2) => this.sourceMetadata(session2));
+  }
+  sourceMetadata(session2) {
+    return {
+      nativeId: session2.acpSessionId,
+      cwd: session2.cwd,
+      title: session2.title ?? this.backendLabel(),
+      updatedAt: session2.updatedAt,
+      running: session2.running,
+      selection: this.selectedModels.get(session2.sessionId)
+    };
+  }
+  async sourceSnapshot(nativeId) {
+    const id6 = `${sessionPrefix(this.backend)}${nativeId}`;
+    if (!this.sessions.has(id6)) await this.sourceCatalog();
+    const session2 = this.sessions.get(id6);
+    if (!session2) throw new Error("The native session was not found in this backend catalog.");
+    await this.hydrateSession(session2);
+    if (session2.staleHistory) throw new Error("Authoritative native history is unavailable; the retained history has not been replaced.");
+    return { ...this.sourceMetadata(session2), entries: structuredClone(session2.events) };
+  }
+  async sourceCreate(cwd2, signal) {
+    const result = record2(await this.createSession({ cwd: cwd2 }, signal));
+    if (result.ok !== true) throw new Error(String(record2(result.error).message ?? "Native session creation failed."));
+    const id6 = string4(record2(result.value).sessionId);
+    if (!id6) throw new Error("Native session creation did not return an identity.");
+    return this.sourceSnapshot(nativeAcpId(id6, this.backend));
+  }
+  /** Explicit native identity: never route controls via preferredSessionId(). */
+  async sourceCall(nativeId, endpoint, args, signal) {
+    await this.sourceSnapshot(nativeId);
+    const result = await this.dispatch(endpoint, { args: { ...args, sessionId: `${sessionPrefix(this.backend)}${nativeId}` } }, signal);
+    if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+    return result.value;
+  }
   backendLabel() {
     return acpBackendLabel(this.backend);
   }
@@ -71429,7 +71473,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           this.restoreCachedSession(session2, stale, true);
           return;
         }
-        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode" || this.backend === "hermes") throw error62;
+        throw error62;
       }
     }
     if (events.length > 0) {
@@ -71589,16 +71633,17 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.sessions.set(session2.sessionId, session2);
     return session2;
   }
-  async discoverAndAttachSessions(workspace2) {
+  async discoverAndAttachSessions(workspace2, limit = 30) {
     if (this.backend === "cursor") return;
     const previousTitles = new Map([...this.sessions].map(([id6, session2]) => [id6, session2.title]));
     try {
       let discovered = [];
       if (this.client.listSessions !== void 0) {
         try {
-          discovered = await this.client.listSessions(workspace2.path, this.backend, 30);
+          discovered = await this.client.listSessions(workspace2.path, this.backend, limit);
+          if (limit === 1e4 && discovered.length >= limit) throw new Error("Native catalog exceeds the complete source catalog limit.");
         } catch (error62) {
-          if (this.backend === "pi" || this.backend === "claude" || this.backend === "hermes") throw error62;
+          throw error62;
         }
       }
       for (const item of discovered) {
@@ -71608,7 +71653,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         }
         const existing = this.sessions.get(sessionId);
         if (existing !== void 0) {
-          if (Number.isFinite(item.updatedAt)) existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt);
+          if (Number.isFinite(item.updatedAt)) {
+            if (item.updatedAt > existing.updatedAt && !existing.running) existing.staleHistory = true;
+            existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt);
+          }
           if (!previousTitles.has(sessionId) || existing.title === previousTitles.get(sessionId)) {
             this.titles.applyNative(existing, item.title);
           }
@@ -71621,7 +71669,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.sortWorkspaceSessions(workspace2);
       workspace2.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     } catch (error62) {
-      if (this.backend === "pi" || this.backend === "claude" || this.backend === "hermes") throw error62;
+      throw error62;
     }
   }
   attachSessionToWorkspace(cwd2, sessionId) {
@@ -104588,6 +104636,70 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
   }
 };
 
+// packages/plugin/src/acp/source-port.ts
+function createAcpSourcePort(createPeer, host, backend) {
+  const listeners = /* @__PURE__ */ new Set();
+  const peer = createPeer(async (event, data2) => {
+    for (const listener of listeners) listener({ event, data: data2 });
+  });
+  const core = {
+    onEvent(handler) {
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
+    },
+    async rpc(method, input4, signal) {
+      signal?.throwIfAborted();
+      let result;
+      switch (method) {
+        case "agent.acp.call":
+          result = await peer.call(input4);
+          break;
+        case "agent.acp.respond":
+          result = await peer.respond(input4);
+          break;
+        case "agent.acp.stream.open":
+          result = await peer.openStream(input4);
+          break;
+        case "agent.acp.stream.close":
+          result = await peer.closeStream(input4);
+          break;
+        case "agent.acp.transfer.open":
+          result = peer.openTransfer(input4);
+          break;
+        case "agent.acp.transfer.chunk":
+          result = peer.appendTransfer(input4);
+          break;
+        case "agent.acp.transfer.commit":
+          result = await peer.commitTransfer(input4);
+          break;
+        case "agent.acp.transfer.read":
+          result = peer.readTransfer(input4);
+          break;
+        case "agent.acp.transfer.close":
+          result = peer.closeTransfer(input4);
+          break;
+        default:
+          throw new Error("Unsupported local ACP transport method.");
+      }
+      return result;
+    }
+  };
+  const facade = new AcpVirtualHarness(new AgentAcpClient(core, ["agent.acp.antigravity.model-load.v1"]), host, backend);
+  return {
+    list: () => facade.sourceCatalog(),
+    read: (nativeId) => facade.sourceSnapshot(nativeId),
+    create: (cwd2, signal) => facade.sourceCreate(cwd2, signal),
+    call: (nativeId, endpoint, args, signal) => facade.sourceCall(nativeId, endpoint, args, signal),
+    async close() {
+      await facade.close();
+      await peer.closeAll();
+      listeners.clear();
+    }
+  };
+}
+
 // packages/plugin/src/service.ts
 var HostPluginRuntime = class {
   constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule) {
@@ -105023,6 +105135,17 @@ var HostPluginRuntime = class {
   }
   acpStatus() {
     return this.acp.status();
+  }
+  createAcpSourcePort(backend) {
+    const identity3 = this.currentIdentity();
+    return createAcpSourcePort((publish) => {
+      const peer = this.acp.createPeer({
+        connectionId: `source:${identity3.deviceId}:${crypto.randomUUID()}`,
+        peerDeviceId: identity3.deviceId
+      }, publish);
+      if (!peer) throw new RpcError("ACP_UNAVAILABLE", "The native Agent backend is unavailable.");
+      return peer;
+    }, { deviceId: identity3.deviceId, name: this.config.deviceName }, backend);
   }
   acpCall(input4) {
     return this.requireLocalAcpPeer().call(input4);

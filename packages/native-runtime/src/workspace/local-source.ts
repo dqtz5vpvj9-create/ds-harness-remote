@@ -39,7 +39,7 @@ export function installLocalSourceWorkspaces(ctx: Context, gateway: SourceGatewa
     configured: readonly SourceWorkspaceConfig[], directory: string, uploadReceipts: ReadonlyMap<string, string> = new Map()): void {
     for (const entry of configured) {
         const source = sources.find(source => source.id === entry.sourceId);
-        if (!source || source.engine !== 'codex') throw new Error('The configured source workspace has no native Codex owner');
+        if (!source) throw new Error('The configured source workspace has no native owner');
         const lifetime = new AbortController();
         // Keep source subprocess ownership separate from the display Host's
         // default Agent services, including their sandbox and lifecycle.
