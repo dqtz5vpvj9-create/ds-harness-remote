@@ -66647,6 +66647,19 @@ var AgentAcpClient = class {
     return Array.isArray(result) ? result : [];
   }
   async listSessions(path, backend, limit, signal) {
+    if (backend === "antigravity" && limit !== void 0 && limit > 100) {
+      const sessions = [];
+      while (sessions.length < limit) {
+        const count = Math.min(100, limit - sessions.length);
+        const page = await this.call("dsh/sessionList", { path, backend, limit: count, offset: sessions.length, prewarm: false }, signal);
+        if (!isRecord3(page) || !Array.isArray(page.items))
+          throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session catalog is invalid.");
+        sessions.push(...page.items);
+        if (page.items.length < count)
+          break;
+      }
+      return sessions;
+    }
     const result = await this.call("dsh/sessionList", {
       path,
       ...backend === void 0 ? {} : { backend },
@@ -96487,6 +96500,7 @@ var schemas2 = {
     path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
     backend: external_exports.string().min(1).max(64).optional(),
     limit: external_exports.number().int().positive().max(100).optional(),
+    offset: external_exports.number().int().nonnegative().max(1e5).optional(),
     prewarm: external_exports.boolean().optional()
   }).strict(),
   "dsh/sessionHistory": external_exports.object({
@@ -97532,7 +97546,8 @@ var AcpRemoteGateway = class {
           assertCurrent();
           this.requireAcp("antigravity").prewarmSession?.(cwd2);
         }
-        const items = await discoverAntigravitySessions(path, limit);
+        const offset = typeof call.params.offset === "number" ? call.params.offset : 0;
+        const items = (await discoverAntigravitySessions(path, offset + limit)).slice(offset);
         if (path) {
           const cwd2 = await this.requireExistingDirectory(path);
           assertCurrent();

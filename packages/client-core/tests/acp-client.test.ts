@@ -3,6 +3,17 @@ import { describe, expect, it, vi } from 'vitest'
 import { ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
 
 describe('ACP image transfer', () => {
+  it('reads the full Antigravity source catalog in bounded pages without prewarming sessions', async () => {
+    const rows = Array.from({ length: 203 }, (_, i) => ({ conversationId: `session-${i}`, title: 'Saved', createdAt: i, updatedAt: i }))
+    const rpc = vi.fn(async (_method: string, request: any) => {
+      expect(request.method).toBe('dsh/sessionList')
+      expect(request.params.limit).toBeLessThanOrEqual(100)
+      expect(request.params.prewarm).toBe(false)
+      return { items: rows.slice(request.params.offset, request.params.offset + request.params.limit) }
+    })
+    expect(await new AgentAcpClient({ rpc } as never).listSessions('/repo', 'antigravity', 10000)).toEqual(rows)
+    expect(rpc.mock.calls.map(([, request]) => request.params.offset)).toEqual([0, 100, 200])
+  })
   it('requires archive capability and the exact OpenCode confirmation', async () => {
     const confirmed = { backend: 'opencode', sessionId: 'ses_1', archived: true }
     const rpc = vi.fn(async () => confirmed)

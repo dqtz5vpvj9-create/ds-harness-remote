@@ -437,7 +437,8 @@ export class AcpRemoteGateway {
           assertCurrent()
           this.requireAcp('antigravity').prewarmSession?.(cwd)
         }
-        const items = await discoverAntigravitySessions(path, limit)
+        const offset = typeof call.params.offset === 'number' ? call.params.offset : 0
+        const items = (await discoverAntigravitySessions(path, offset + limit)).slice(offset)
         if (path) {
           const cwd = await this.requireExistingDirectory(path)
           assertCurrent()

@@ -129,6 +129,17 @@ export class AgentAcpClient {
     limit?: number,
     signal?: AbortSignal,
   ): Promise<Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }>> {
+    if (backend === 'antigravity' && limit !== undefined && limit > 100) {
+      const sessions: Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }> = []
+      while (sessions.length < limit) {
+        const count = Math.min(100, limit - sessions.length)
+        const page = await this.call('dsh/sessionList', { path, backend, limit: count, offset: sessions.length, prewarm: false }, signal)
+        if (!isRecord(page) || !Array.isArray(page.items)) throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session catalog is invalid.')
+        sessions.push(...page.items as typeof sessions)
+        if (page.items.length < count) break
+      }
+      return sessions
+    }
     const result = await this.call('dsh/sessionList', {
       path,
       ...(backend === undefined ? {} : { backend }),

@@ -66,6 +66,7 @@ const schemas = {
     path: z.string().min(1).max(4096).or(z.literal('')),
     backend: z.string().min(1).max(64).optional(),
     limit: z.number().int().positive().max(100).optional(),
+    offset: z.number().int().nonnegative().max(100000).optional(),
     prewarm: z.boolean().optional(),
   }).strict(),
   'dsh/sessionHistory': z.object({
