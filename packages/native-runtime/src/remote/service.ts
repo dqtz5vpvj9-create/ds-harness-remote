@@ -325,7 +325,9 @@ export function installSources(ctx: Context, sources: readonly DirectSourceConfi
         const cache = join(directory, createHash('sha256').update(JSON.stringify([source.machineId, source.id, source.engine])).digest('hex'));
         uploadReceipts.set(source.id, join(cache, 'uploads'));
         if (source.engine === 'antigravity') return new DirectAcpAdapter(source, cache, () => {
-            const runtime = (ctx as unknown as { dshRemote?: { createAcpSourcePort(backend: 'antigravity'): AcpSourcePort } }).dshRemote;
+            // Optional Remote service: sources also run in Codex-only profiles.
+            // Cordis property access requires injection even when it is provided.
+            const runtime = ctx.get('dshRemote') as { createAcpSourcePort(backend: 'antigravity'): AcpSourcePort } | undefined;
             if (!runtime) throw new SourceError('TARGET_UNAVAILABLE', 'The Remote Agent service is unavailable on this Host.');
             return runtime.createAcpSourcePort('antigravity');
         }, workspaces.some(entry => entry.sourceId === source.id));

@@ -39,3 +39,31 @@ test('ACP source preserves history, source identity and write receipts across re
         await assert.rejects(adapter.nativeAccess.call({ sourceId: 'agy', method: 'turn/start', params: {} }), /not supported/);
     } finally { await adapter.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('a native source plugin can discover an optional Remote sibling service', async () => {
+    const { Context } = await import('@deepseek-ai/cordis');
+    const { default: TypertRegistry } = await import('@deepseek-ai/dsh-typert-registry');
+    const { default: RemoteAccessService } = await import('@deepseek-ai/dsh-api-remote-access');
+    const { installSources } = await import('../src/remote/service.ts');
+    const ctx = new Context();
+    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-acp-cordis-');
+    let reads = 0;
+    try {
+        await ctx.plugin(TypertRegistry); new RemoteAccessService(ctx);
+        await ctx.plugin({ name: 'remote-fixture', apply(scope: InstanceType<typeof Context>) {
+            scope.provide('dshRemote', { createAcpSourcePort() { return {
+                list: async () => { reads++; return [{ nativeId: 'native', cwd: directory, title: 'Native', updatedAt: 1, running: false }]; },
+                close: async () => {},
+            }; } });
+        } });
+        let source: ReturnType<typeof installSources> | undefined;
+        await ctx.plugin({ name: 'native-fixture', inject: ['typert', 'remoteAccess'], apply(scope: InstanceType<typeof Context>) {
+            source = installSources(scope, [{ id: 'agy', machineId: 'machine', engine: 'antigravity' }], directory);
+        } });
+        assert.ok(source);
+        const catalog = await source.catalog(() => true);
+        assert.equal(catalog.sources[0]?.online, true);
+        assert.equal(catalog.sessions[0]?.nativeId, 'native');
+        assert.equal(reads, 1);
+    } finally { await ctx.fiber.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
