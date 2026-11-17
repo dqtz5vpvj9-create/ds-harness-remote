@@ -1,6 +1,6 @@
 /** Durable source contract around Remote's existing ACP execution and DSH projection. */
 import { createHash } from 'node:crypto';
-import { join, isAbsolute } from 'node:path';
+import { join, isAbsolute, extname } from 'node:path';
 import { realpath, stat, readFile, mkdir } from 'node:fs/promises';
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write';
 import type { FileUploadValue } from '@deepseek-ai/dsh-client-file-upload/types';
@@ -29,6 +29,14 @@ export interface AcpSourcePort {
 const validOutcome = (value: unknown): value is CodexCallResult => !!value && typeof value === 'object'
     && 'status' in value && ['accepted', 'rejected', 'indeterminate'].includes(String(value.status))
     && 'message' in value && typeof value.message === 'string';
+
+function imageMimeType(bytes: Buffer, name: string): string | undefined {
+    if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+    if (['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6))) return 'image/gif';
+    if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<string, string>)[extname(name).toLowerCase()];
+}
 
 export class DirectAcpAdapter implements SourceAdapter {
     readonly id: string;
@@ -95,10 +103,13 @@ export class DirectAcpAdapter implements SourceAdapter {
         const session = this.metadata(snapshot);
         // Attachment bytes remain in the source attachment reader, never in a
         // history row whose page budget could otherwise hide the whole turn.
-        snapshot.entries = snapshot.entries.map(entry => {
-            const event = structuredClone(entry.event), data = event.data as Record<string, unknown>;
-            const body = event.type === 'assistant/message' ? data.message as Record<string, unknown> : data;
-            if (Array.isArray(body?.content)) body.content = body.content.map(part => {
+        const entries = snapshot.entries.map(entry => {
+            const data = entry.event.data as Record<string, unknown>;
+            const body = entry.event.type === 'assistant/message' ? data.message as Record<string, unknown> : data;
+            if (!Array.isArray(body?.content) || !body.content.some(part => part && typeof part === 'object' && part.type === 'image' && part.attachment && 'data' in part)) return entry;
+            const event = structuredClone(entry.event), clonedData = event.data as Record<string, unknown>;
+            const clonedBody = event.type === 'assistant/message' ? clonedData.message as Record<string, unknown> : clonedData;
+            clonedBody.content = (clonedBody.content as Array<Record<string, unknown> | null>).map(part => {
                 if (!part || typeof part !== 'object' || part.type !== 'image' || !part.attachment) return part;
                 const { data: _bytes, ...reference } = part; return reference;
             });
@@ -110,36 +121,44 @@ export class DirectAcpAdapter implements SourceAdapter {
             this.indexes.set(nativeId, index);
         }
         const store = index;
+        const old = store.cached<typeof entries>('acp/snapshot') ?? [];
+        const graphCurrent = store.cached<number>('acp/dependency-version') === 1;
+        let resetAt = graphCurrent ? Math.min(old.length, entries.length) : 0;
+        for (let i = 0; i < resetAt; i++) {
+            if (old[i]!.type !== entries[i]!.type || JSON.stringify(old[i]!.event) !== JSON.stringify(entries[i]!.event)) { resetAt = i; break; }
+        }
+        const previous = store.session;
+        const metadataChanged = session.title !== previous.title || session.cwd !== previous.cwd
+            || session.updatedAt !== previous.updatedAt || session.status !== previous.status
+            || session.activeTurnId !== previous.activeTurnId || JSON.stringify(session.agent) !== JSON.stringify(previous.agent);
+        if (graphCurrent && resetAt === old.length && entries.length === old.length && !metadataChanged) return store;
         // The existing projection owns DSH event conversion. Persist its accepted
         // snapshot atomically, and explicitly reset cursors on a native rewrite.
         store.edit(session, () => {
-            const old = store.cached<Array<{ type: 'event'; event: EventInput & { seq: number } }>>('acp/snapshot') ?? [];
-            const entries = snapshot.entries!;
-            let resetAt = Math.min(old.length, entries.length);
-            for (let i = 0; i < Math.min(old.length, entries.length); i++) {
-                if (old[i]!.event.type !== entries[i]!.event.type || old[i]!.event.seq !== entries[i]!.event.seq) { resetAt = i; break; }
-            }
             if (resetAt < old.length) store.removeFrom(resetAt + 1);
             const calls = new Map<string, string>();
-            let turnStart: string | undefined, stepStart: string | undefined;
+            let turnStart: string | undefined, stepStart: string | undefined, stepMessage: string | undefined;
             entries.forEach((entry, offset) => {
                 if (entry.type !== 'event' || !Number.isSafeInteger(entry.event.seq)) throw new SourceError('HISTORY_UNAVAILABLE', 'Invalid native history entry.');
                 const key = `acp:${offset}`, { seq: _seq, ...event } = entry.event;
                 const data = event.data as Record<string, unknown>;
-                if (event.type === 'turn/start') { turnStart = undefined; stepStart = undefined; }
-                if (event.type === 'step/start') stepStart = undefined;
+                if (event.type === 'turn/start') { turnStart = undefined; stepStart = undefined; stepMessage = undefined; }
+                if (event.type === 'step/start') { stepStart = undefined; stepMessage = undefined; }
                 const deps: string[] = [];
                 if (turnStart) deps.push(turnStart);
                 if (stepStart) deps.push(stepStart);
+                if (stepMessage && (event.type === 'tool/call' || event.type === 'tool/result')) deps.push(stepMessage);
                 const source = (data.message as Record<string, unknown> | undefined)?.source as Record<string, unknown> | undefined;
                 const callId = typeof data.callId === 'string' ? data.callId : typeof source?.callId === 'string' ? source.callId : undefined;
                 if (callId && calls.has(callId)) deps.push(calls.get(callId)!);
-                store.put(key, event, deps, offset + 1);
+                if (offset >= resetAt) store.put(key, event, deps, offset + 1);
                 if (event.type === 'turn/start') turnStart = key;
                 if (event.type === 'step/start') stepStart = key;
+                if (event.type === 'assistant/message') stepMessage = key;
                 if (event.type === 'tool/call' && callId) calls.set(callId, key);
             });
             store.cache('acp/snapshot', entries);
+            store.cache('acp/dependency-version', 1);
         });
         return store;
     }
@@ -186,16 +205,19 @@ export class DirectAcpAdapter implements SourceAdapter {
     receipt(request: SourceOperation) { this.identity(request.sessionId); return this.operations.stored(request); }
     async upload(request: SourceUploadRequest, signal?: AbortSignal): Promise<FileUploadValue> {
         await this.resolve(request.sessionId, signal);
-        if (!/^[0-9a-f-]{36}$/i.test(request.operationId) || Buffer.from(request.data, 'base64').toString('base64') !== request.data || request.data.length > 8 * 1024 * 1024)
+        if (!/^[0-9a-f-]{36}$/i.test(request.operationId) || request.data.length > Math.ceil(8 * 1024 * 1024 / 3) * 4)
             throw new SourceError('INVALID_REQUEST', 'Invalid attachment identity or bytes.');
         const bytes = Buffer.from(request.data, 'base64'), directory = join(this.directory, 'uploads');
+        if (bytes.length > 8 * 1024 * 1024 || bytes.toString('base64') !== request.data)
+            throw new SourceError('INVALID_REQUEST', 'Invalid attachment identity or bytes.');
+        const mimeType = imageMimeType(bytes, request.name);
         const path = join(directory, createHash('sha256').update(bytes).digest('hex'));
         await mkdir(directory, { recursive: true, mode: 0o700 });
         await writeFileAtomic(path, bytes, { mode: 0o600 });
         const value: FileUploadValue = { receiptId: request.operationId as FileUploadValue['receiptId'],
             file: { attachmentId: request.operationId as FileUploadValue['file']['attachmentId'], name: request.name, bytes: bytes.length } };
         await registerStoredCodexUpload(directory, request.operationId, { sessionId: request.sessionId, path,
-            name: request.name, bytes: bytes.length, image: false, value }, signal);
+            name: request.name, bytes: bytes.length, image: mimeType !== undefined, ...(mimeType ? { mimeType } : {}), value }, signal);
         return value;
     }
     async readResource(request: SourceResourceRequest, signal?: AbortSignal): Promise<SourceResource> {
@@ -223,7 +245,7 @@ export class DirectAcpAdapter implements SourceAdapter {
         const params = request.params ?? {}, nativeId = params.sessionId;
         if (typeof nativeId !== 'string') throw new SourceError('INVALID_REQUEST', 'An explicit native session identity is required.');
         const id = sourceSessionId({ machineId: this.machineId, sourceId: this.id, engine: this.engine, nativeId });
-        await this.refresh(id, signal);
+        if (request.method !== 'session/models' || !this.indexes.has(nativeId)) await this.refresh(id, signal);
         const execute = async (): Promise<CodexCallResult> => ({ status: 'accepted', message: 'The native source confirmed this operation.',
             result: await this.port().call(nativeId, request.method, params, this.lifetime.signal) });
         if (request.method === 'session/models') return execute();

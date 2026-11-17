@@ -1,9 +1,99 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { DirectAcpAdapter, type AcpSourcePort, type AcpSourceSnapshot } from '../src/remote/acp-adapter.ts';
 import { sourceSessionId } from '../src/remote/protocol.ts';
 import { parseSources, parseSourceWorkspaces } from '../src/remote/config.ts';
+import { SourceEventIndex } from '../src/remote/event-index.ts';
+import { CodexHistory } from '../src/remote/codex-history.ts';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+test('ACP polling skips unchanged writes, appends only the suffix and retains tool context', async () => {
+    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-acp-poll-');
+    const config = { id: 'agy', machineId: 'machine', engine: 'antigravity' as const };
+    const sessionId = sourceSessionId({ machineId: 'machine', sourceId: 'agy', engine: 'antigravity', nativeId: 'session' });
+    const session = { ...config, nativeId: 'session', id: sessionId, cwd: directory, title: 'Native', updatedAt: 1,
+        status: 'idle' as const, activeTurnId: null, capabilities: { send: true, steer: false, cancel: true, approve: false, files: true, images: true }, pendingRequests: [] };
+    const fixture = new SourceEventIndex(':memory:', session), history = new CodexHistory(fixture);
+    history.beginTurn(session, { id: 'turn', status: 'inProgress' });
+    history.acceptItem(session, 'turn', { id: 'tool', type: 'commandExecution', command: 'echo test', cwd: directory, aggregatedOutput: 'test', status: 'completed' }, true);
+    const events = fixture.read({ sessionId }).entries as AcpSourceSnapshot['entries'];
+    fixture.dispose();
+    assert.ok(events && events.length >= 5);
+    const snapshot: AcpSourceSnapshot = { nativeId: 'session', cwd: directory, title: 'Native', running: false, updatedAt: 1, entries: events.slice(0, 3) };
+    let reads = 0;
+    const port: AcpSourcePort = { list: async () => [snapshot], read: async () => { reads++; return structuredClone(snapshot); },
+        create: async () => snapshot, call: async () => ({}), close: async () => {} };
+    let adapter = new DirectAcpAdapter(config, directory, () => port, true);
+    const edit = mock.method(SourceEventIndex.prototype, 'edit');
+    const put = mock.method(SourceEventIndex.prototype, 'put');
+    const abort = new AbortController();
+    try {
+        const page = await adapter.read({ sessionId });
+        edit.mock.resetCalls(); put.mock.resetCalls();
+        const iterator = adapter.changes({ sessionId, epoch: page.epoch, version: page.version }, abort.signal)[Symbol.asyncIterator]();
+        const next = iterator.next();
+        while (reads < 3) await delay(50);
+        assert.equal(edit.mock.callCount(), 0);
+        assert.equal(put.mock.callCount(), 0);
+        snapshot.entries = events;
+        const frame = await next;
+        assert.equal(frame.value!.upserts.length, events.length - 3);
+        assert.equal(put.mock.callCount(), events.length - 3);
+        const resultSequence = events.findIndex(entry => entry.event.type === 'tool/result') + 1;
+        const last = await adapter.read({ sessionId, around: resultSequence, limit: 1 });
+        assert.deepEqual(last.entries.map(entry => entry.event.type), ['turn/start', 'step/start', 'assistant/message', 'tool/call', 'tool/result']);
+        assert.equal(last.context.length, 4);
+        abort.abort(); await iterator.return?.().catch(() => undefined);
+        const prior = await adapter.read({ sessionId });
+        snapshot.entries = structuredClone(events);
+        snapshot.entries[2]!.event.time += 1;
+        const revised = await adapter.read({ sessionId });
+        assert.notEqual(revised.epoch, prior.epoch);
+        assert.equal(revised.entries[2]!.event.time, snapshot.entries[2]!.event.time);
+        snapshot.title = 'Renamed';
+        assert.equal((await adapter.resolve(sessionId)).title, 'Renamed');
+        const beforeModels = reads;
+        await adapter.nativeAccess.call({ sourceId: 'agy', method: 'session/models', params: { sessionId: 'session' } });
+        assert.equal(reads, beforeModels);
+        await adapter.dispose();
+        const db = new DatabaseSync(join(directory, 'history', `${createHash('sha256').update('session').digest('hex')}.sqlite`));
+        try { db.exec("DELETE FROM native_cache WHERE key='acp/dependency-version'; UPDATE events SET dependencies='[]'"); }
+        finally { db.close(); }
+        adapter = new DirectAcpAdapter(config, directory, () => port, true);
+        const migrated = await adapter.read({ sessionId, around: resultSequence, limit: 1 });
+        assert.equal(migrated.context.length, 4, 'legacy indexes regain tool dependencies on first refresh');
+    } finally { abort.abort(); edit.mock.restore(); put.mock.restore(); await adapter.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('ACP upload forwards supported images with the detected MIME type', async () => {
+    const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-acp-upload-');
+    const config = { id: 'agy', machineId: 'machine', engine: 'antigravity' as const };
+    const sessionId = sourceSessionId({ machineId: 'machine', sourceId: 'agy', engine: 'antigravity', nativeId: 'session' });
+    const snapshot: AcpSourceSnapshot = { nativeId: 'session', cwd: directory, title: 'Native', running: false, updatedAt: 1, entries: [] };
+    const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = [];
+    const port: AcpSourcePort = { list: async () => [snapshot], read: async () => structuredClone(snapshot), create: async () => snapshot,
+        call: async (_id, endpoint, args) => { calls.push({ endpoint, args }); return {}; }, close: async () => {} };
+    const adapter = new DirectAcpAdapter(config, directory, () => port, true);
+    try {
+        const cases = [
+            { name: 'image.bin', bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2]), mime: 'image/png' },
+            { name: 'image.png', bytes: Buffer.from([0xff, 0xd8, 0xff, 1]), mime: 'image/jpeg' },
+            { name: 'image.bin', bytes: Buffer.from('GIF89a'), mime: 'image/gif' },
+            { name: 'image.bin', bytes: Buffer.from('RIFF0000WEBP'), mime: 'image/webp' },
+            { name: 'image.JPEG', bytes: Buffer.from('extension fallback'), mime: 'image/jpeg' },
+        ];
+        for (const [i, item] of cases.entries()) {
+            const data = item.bytes.toString('base64');
+            const receipt = await adapter.upload({ sessionId, operationId: `00000000-0000-4000-8000-00000000000${i + 1}`, name: item.name, data });
+            await adapter.operate({ sessionId, operationId: `send-image-${i}`, kind: 'send', files: [receipt.receiptId] });
+            assert.deepEqual(calls.at(-1)?.args.content, [{ type: 'image', mediaType: item.mime, data }]);
+        }
+    } finally { await adapter.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
 
 test('ACP source preserves history, source identity and write receipts across restart', async () => {
     const directory = await mkdtemp('/mnt/cache/data-cache/hhpi-acp-contract-');

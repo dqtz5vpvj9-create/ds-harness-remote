@@ -71005,21 +71005,28 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
    * Discovery never creates a session or selects a global current workspace. */
   async sourceCatalog() {
     if (!this.client.listWorkspaces) throw new Error("The backend has no workspace catalog.");
+    const workspaces = /* @__PURE__ */ new Map();
     for (const item of await this.client.listWorkspaces(this.backend)) {
       const workspace2 = createAcpWorkspaceView(item.path, this.backend);
       if (!this.workspaceById.has(workspace2.workspaceId)) this.workspaceById.set(workspace2.workspaceId, workspace2);
-      await this.discoverAndAttachSessions(this.workspaceById.get(workspace2.workspaceId), 1e4);
+      workspaces.set(workspace2.workspaceId, this.workspaceById.get(workspace2.workspaceId));
     }
+    const pending = [...workspaces.values()];
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+      while (next < pending.length) await this.discoverAndAttachSessions(pending[next++], 1e4);
+    }));
     return [...this.sessions.values()].map((session2) => this.sourceMetadata(session2));
   }
   sourceMetadata(session2) {
+    const selected = this.selectedModels.get(session2.sessionId);
     return {
       nativeId: session2.acpSessionId,
       cwd: session2.cwd,
       title: session2.title ?? this.backendLabel(),
       updatedAt: session2.updatedAt,
       running: session2.running,
-      selection: this.selectedModels.get(session2.sessionId)
+      selection: selected?.model === "host-settings" ? void 0 : selected
     };
   }
   async sourceSnapshot(nativeId) {
@@ -71040,8 +71047,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   /** Explicit native identity: never route controls via preferredSessionId(). */
   async sourceCall(nativeId, endpoint, args, signal) {
-    await this.sourceSnapshot(nativeId);
-    const result = await this.dispatch(endpoint, { args: { ...args, sessionId: `${sessionPrefix(this.backend)}${nativeId}` } }, signal);
+    const id6 = `${sessionPrefix(this.backend)}${nativeId}`;
+    if (endpoint === "session/models" || endpoint === "session/selectModel") {
+      if (!this.sessions.has(id6)) await this.sourceCatalog();
+      if (!this.sessions.has(id6)) throw new Error("The native session was not found in this backend catalog.");
+    } else await this.sourceSnapshot(nativeId);
+    const result = await this.dispatch(endpoint, { args: { ...args, sessionId: id6 } }, signal);
     if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
     return result.value;
   }
@@ -71654,11 +71665,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       if (this.client.listSessions !== void 0) {
         try {
           discovered = await this.client.listSessions(workspace2.path, this.backend, limit);
-          if (limit === 1e4 && discovered.length >= limit) throw new Error("Native catalog exceeds the complete source catalog limit.");
+          discovered = discovered.slice(0, limit);
         } catch (error62) {
           throw error62;
         }
       }
+      const attached = new Set(workspace2.sessionIds);
       for (const item of discovered) {
         const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`;
         if (!this.sessions.has(sessionId)) {
@@ -71674,8 +71686,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
             this.titles.applyNative(existing, item.title);
           }
         }
-        if (!this.archivedSessionIds.has(sessionId) && !workspace2.sessionIds.includes(sessionId)) {
+        if (!this.archivedSessionIds.has(sessionId) && !attached.has(sessionId)) {
           workspace2.sessionIds.push(sessionId);
+          attached.add(sessionId);
         }
       }
       workspace2.sessionCount = workspace2.sessionIds.length;

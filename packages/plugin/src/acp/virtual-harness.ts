@@ -176,17 +176,24 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
    * Discovery never creates a session or selects a global current workspace. */
   async sourceCatalog() {
     if (!this.client.listWorkspaces) throw new Error('The backend has no workspace catalog.')
+    const workspaces = new Map<string, AcpVirtualWorkspaceView>()
     for (const item of await this.client.listWorkspaces(this.backend)) {
       const workspace = createAcpWorkspaceView(item.path, this.backend)
       if (!this.workspaceById.has(workspace.workspaceId)) this.workspaceById.set(workspace.workspaceId, workspace)
-      await this.discoverAndAttachSessions(this.workspaceById.get(workspace.workspaceId)!, 10000)
+      workspaces.set(workspace.workspaceId, this.workspaceById.get(workspace.workspaceId)!)
     }
+    const pending = [...workspaces.values()]
+    let next = 0
+    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+      while (next < pending.length) await this.discoverAndAttachSessions(pending[next++]!, 10000)
+    }))
     return [...this.sessions.values()].map(session => this.sourceMetadata(session))
   }
 
   private sourceMetadata(session: AcpSessionState) {
+    const selected = this.selectedModels.get(session.sessionId)
     return { nativeId: session.acpSessionId, cwd: session.cwd, title: session.title ?? this.backendLabel(),
-      updatedAt: session.updatedAt, running: session.running, selection: this.selectedModels.get(session.sessionId) }
+      updatedAt: session.updatedAt, running: session.running, selection: selected?.model === 'host-settings' ? undefined : selected }
   }
 
   async sourceSnapshot(nativeId: string) {
@@ -209,8 +216,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   /** Explicit native identity: never route controls via preferredSessionId(). */
   async sourceCall(nativeId: string, endpoint: string, args: JsonRecord, signal: AbortSignal) {
-    await this.sourceSnapshot(nativeId)
-    const result = await this.dispatch(endpoint, { args: { ...args, sessionId: `${sessionPrefix(this.backend)}${nativeId}` } }, signal)
+    const id = `${sessionPrefix(this.backend)}${nativeId}`
+    if (endpoint === 'session/models' || endpoint === 'session/selectModel') {
+      if (!this.sessions.has(id)) await this.sourceCatalog()
+      if (!this.sessions.has(id)) throw new Error('The native session was not found in this backend catalog.')
+    } else await this.sourceSnapshot(nativeId)
+    const result = await this.dispatch(endpoint, { args: { ...args, sessionId: id } }, signal)
     if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code })
     return result.value
   }
@@ -848,11 +859,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       if (this.client.listSessions !== undefined) {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, limit)
-          if (limit === 10000 && discovered.length >= limit) throw new Error('Native catalog exceeds the complete source catalog limit.')
+          discovered = discovered.slice(0, limit)
         } catch (error) {
           throw error
         }
       }
+      const attached = new Set(workspace.sessionIds)
       for (const item of discovered) {
         const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`
         if (!this.sessions.has(sessionId)) {
@@ -869,8 +881,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
             this.titles.applyNative(existing, item.title)
           }
         }
-        if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
+        if (!this.archivedSessionIds.has(sessionId) && !attached.has(sessionId)) {
           workspace.sessionIds.push(sessionId)
+          attached.add(sessionId)
         }
       }
       workspace.sessionCount = workspace.sessionIds.length
