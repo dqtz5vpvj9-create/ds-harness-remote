@@ -2,6 +2,13 @@
 
 版本条目保留发布时的功能和验证范围；当前使用方式与限制见[文档入口](README.md)和[版本兼容](compatibility.zh.md)。
 
+## Fork — Unreleased
+
+- Provide an optional windowless Windows AGY launcher that reuses the same user's existing login from a background Host, forwards CLI streams, and cleans up child processes on cancellation.
+- Keep Antigravity catalog and history failures explicit instead of replacing existing content with an empty successful result. Hide Windows model-discovery console windows.
+- 提供可选的 Windows AGY 无窗口启动器，让后台 Host 使用同一用户已有登录，转发 CLI 输入输出，并在取消时清理子进程。
+- Antigravity 目录和历史读取失败保留错误，不再作为空结果覆盖已有内容；模型发现不弹控制台。
+
 ## 0.6.5 — 2026-11-15
 
 Android build 72.

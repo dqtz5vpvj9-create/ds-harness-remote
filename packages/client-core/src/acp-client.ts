@@ -114,10 +114,10 @@ export class AgentAcpClient {
     const result = await this.call('dsh/workspaceList', {
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
+      if (backend === 'antigravity' || backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
       return []
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'hermes') && !Array.isArray(result)) {
+    if ((backend === 'antigravity' || backend === 'pi' || backend === 'claude' || backend === 'hermes') && !Array.isArray(result)) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP workspace catalog is invalid.')
     }
     return Array.isArray(result) ? result as Array<{ path: string; title?: string; sessionCount?: number }> : []
@@ -134,10 +134,10 @@ export class AgentAcpClient {
       ...(backend === undefined ? {} : { backend }),
       ...(limit === undefined ? {} : { limit }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
+      if (backend === 'antigravity' || backend === 'pi' || backend === 'claude' || backend === 'hermes') throw error
       return { items: [] }
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.items))) {
+    if ((backend === 'antigravity' || backend === 'pi' || backend === 'claude' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.items))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session catalog is invalid.')
     }
     return isRecord(result) && Array.isArray(result.items) ? result.items as Array<{
@@ -157,10 +157,10 @@ export class AgentAcpClient {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') throw error
+      if (backend === 'antigravity' || backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') throw error
       return { events: [] }
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.events))) {
+    if ((backend === 'antigravity' || backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
     return isRecord(result) && Array.isArray(result.events) ? result.events : []

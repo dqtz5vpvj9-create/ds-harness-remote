@@ -66637,11 +66637,11 @@ var AgentAcpClient = class {
     const result = await this.call("dsh/workspaceList", {
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "hermes")
+      if (backend === "antigravity" || backend === "pi" || backend === "claude" || backend === "hermes")
         throw error62;
       return [];
     });
-    if ((backend === "pi" || backend === "claude" || backend === "hermes") && !Array.isArray(result)) {
+    if ((backend === "antigravity" || backend === "pi" || backend === "claude" || backend === "hermes") && !Array.isArray(result)) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP workspace catalog is invalid.");
     }
     return Array.isArray(result) ? result : [];
@@ -66652,11 +66652,11 @@ var AgentAcpClient = class {
       ...backend === void 0 ? {} : { backend },
       ...limit === void 0 ? {} : { limit }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "hermes")
+      if (backend === "antigravity" || backend === "pi" || backend === "claude" || backend === "hermes")
         throw error62;
       return { items: [] };
     });
-    if ((backend === "pi" || backend === "claude" || backend === "hermes") && (!isRecord3(result) || !Array.isArray(result.items))) {
+    if ((backend === "antigravity" || backend === "pi" || backend === "claude" || backend === "hermes") && (!isRecord3(result) || !Array.isArray(result.items))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session catalog is invalid.");
     }
     return isRecord3(result) && Array.isArray(result.items) ? result.items : [];
@@ -66666,11 +66666,11 @@ var AgentAcpClient = class {
       sessionId,
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes")
+      if (backend === "antigravity" || backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes")
         throw error62;
       return { events: [] };
     });
-    if ((backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes") && (!isRecord3(result) || !Array.isArray(result.events))) {
+    if ((backend === "antigravity" || backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes") && (!isRecord3(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
     }
     return isRecord3(result) && Array.isArray(result.events) ? result.events : [];
@@ -94939,7 +94939,7 @@ function parseAgyModels(output2) {
 }
 async function readAgyModels(binary) {
   try {
-    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8" });
+    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true });
     return parseAgyModels(result.stdout);
   } catch {
     throw new Error("The installed AGY model catalog is unavailable. Retry after checking the Host CLI.");

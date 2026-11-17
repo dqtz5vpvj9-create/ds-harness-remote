@@ -19,6 +19,7 @@ describe('ACP image transfer', () => {
   })
   it('preserves authoritative ACP catalog/history failures instead of returning an empty successful baseline', async () => {
     const reads = [
+      ...['workspaces', 'catalog', 'history'].map(kind => ({ backend: 'antigravity', kind })),
       { backend: 'pi', kind: 'workspaces' }, { backend: 'pi', kind: 'catalog' },
       ...['pi', 'claude', 'opencode'].map(backend => ({ backend, kind: 'history' })),
     ]
