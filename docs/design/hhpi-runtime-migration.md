@@ -53,3 +53,18 @@ must reuse source identity and the same receipt store; it cannot undo an
 already accepted native operation or replay an uncertain send. Compare latency,
 history reading and memory on the same machine/data/network before switching.
 Live acceptance evidence belongs in ignored artifacts, not this design document.
+
+## Following upstream
+
+The owned fork uses `hhpi-runtime` as its default branch. The upstream integration
+workflow checks release tags daily and checks unreleased main changes each
+Monday; it can also be dispatched manually. It merges into a disposable CI
+checkout and runs the combined protocol, crypto, transport, native-runtime and
+installation checks. Conflicts and a Git bundle of a mergeable candidate are
+retained as workflow artifacts. It has read-only repository permissions and
+does not change the distribution branch, create a PR or deploy a candidate.
+
+After CI succeeds, import the candidate into an integration branch and run the
+Web/Go behavior and native-source acceptance against the current distribution.
+Only then promote the candidate. A green candidate build alone cannot replace
+the weak-network, source-identity, approval or interface acceptance requirements.

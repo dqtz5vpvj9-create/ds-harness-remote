@@ -1,0 +1,90 @@
+name: Upstream integration candidate
+
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-integration
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: hhpi-runtime
+          fetch-depth: 0
+      - name: Check upstream main and releases
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/liguobao/ds-harness-remote.git main:refs/remotes/upstream/main '+refs/tags/*:refs/upstream-tags/*'
+          mkdir -p integration-evidence
+          git rev-parse HEAD > integration-evidence/fork.txt
+          git rev-parse refs/remotes/upstream/main > integration-evidence/upstream.txt
+          changed=false
+          if ! git merge-base --is-ancestor refs/remotes/upstream/main HEAD; then
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$(date -u +%u)" == 1 ]]; then
+              changed=true
+            else
+              while IFS= read -r tag; do
+                commit=$(git rev-parse "${tag}^{commit}")
+                if git merge-base --is-ancestor "$commit" refs/remotes/upstream/main && ! git merge-base --is-ancestor "$commit" HEAD; then
+                  changed=true
+                  break
+                fi
+              done < <(git for-each-ref --format='%(refname)' refs/upstream-tags/)
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          git log --oneline HEAD..refs/remotes/upstream/main > integration-evidence/upstream-commits.txt
+      - name: Merge only in the disposable CI checkout
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          git config user.name 'HHPI integration checks'
+          git config user.email 'integration@users.noreply.github.com'
+          if ! git merge --no-ff --no-edit refs/remotes/upstream/main; then
+            git diff --name-only --diff-filter=U > integration-evidence/conflicts.txt
+            exit 1
+          fi
+          git diff --stat "$(cat integration-evidence/fork.txt)" HEAD > integration-evidence/change-stat.txt
+          git bundle create integration-evidence/candidate.bundle HEAD
+      - uses: pnpm/action-setup@v6
+        if: steps.upstream.outputs.changed == 'true'
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v7
+        if: steps.upstream.outputs.changed == 'true'
+        with:
+          node-version: 24.9.0
+          cache: pnpm
+      - name: Check the combined implementation
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          node scripts/prepare-native-sdk.mjs "$RUNNER_TEMP/remote-native-sdk"
+          pnpm --filter './packages/**' -r build
+          pnpm -r check
+          pnpm -r test
+          pnpm exec tsc -p tests/tsconfig.json
+          node --import tsx --test tests/native-multihost-network.test.ts
+          pnpm exec vitest run tests/native-sdk.test.ts
+          NODE_ENV=production pnpm --workspace-concurrency=1 -r build
+          node scripts/verify-dsh-plugin.mjs
+          node scripts/verify-packed-webrtc.mjs
+      - name: Preserve candidate and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: upstream-integration-${{ github.run_id }}
+          path: integration-evidence/
+          retention-days: 30
