@@ -16,6 +16,7 @@ export interface StepLogRecord {
   created_at: string
   content?: string
   thinking?: string
+  model?: string
   tool_calls?: ToolCallPayload[]
   truncated_fields?: string[]
 }

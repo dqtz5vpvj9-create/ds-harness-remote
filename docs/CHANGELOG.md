@@ -4,6 +4,8 @@
 
 ## Fork — Unreleased
 
+- Restore compacted Antigravity history from its full native transcript and include model attribution required by the DSH reader, fixing conversations that failed to open.
+- 从原生完整记录恢复 Antigravity 缩略历史，并补齐 DSH 阅读器必需的模型来源字段，修复已有会话无法打开的问题。
 - Provide an optional windowless Windows AGY launcher that reuses the same user's existing login from a background Host, forwards CLI streams, and cleans up child processes on cancellation.
 - Keep Antigravity catalog and history failures explicit instead of replacing existing content with an empty successful result. Hide Windows model-discovery console windows.
 - 提供可选的 Windows AGY 无窗口启动器，让后台 Host 使用同一用户已有登录，转发 CLI 输入输出，并在取消时清理子进程。

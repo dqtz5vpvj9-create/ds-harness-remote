@@ -37,35 +37,30 @@ export async function loadTranscriptEvents(
   sessionId: string,
   baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
 ): Promise<HydratedSessionEvent[]> {
-  let content = ''
-  try {
-    const filePath = await transcriptPath(baseDir, conversationId)
-    if (filePath === undefined) throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript is unavailable.')
-    if ((await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
-      throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript exceeds the history transfer limit.')
-    }
-    // Bound the actual read too: a concurrently growing transcript must not
-    // allocate beyond the transfer budget after passing the initial stat.
-    const handle = await fs.open(filePath, 'r')
-    try {
-      const parts: Buffer[] = []
-      let size = 0
-      while (true) {
-        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size))
-        const { bytesRead } = await handle.read(chunk)
-        if (!bytesRead) break
-        size += bytesRead
-        if (size > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript exceeds the history transfer limit.')
-        parts.push(chunk.subarray(0, bytesRead))
+  const records = parseTranscript(await readTranscript(baseDir, conversationId, 'transcript.jsonl'))
+  // AGY writes a compact transcript and an authoritative full companion.
+  // Restore by native record identity, never by line position: either file can
+  // be ahead while the CLI is appending. Missing full records remain an error.
+  if (records.some(record => record.truncated_fields?.length)) {
+    const full = parseTranscript(await readTranscript(baseDir, conversationId, 'transcript_full.jsonl').catch(error => {
+      if (error instanceof RpcError && error.code === 'HISTORY_UNAVAILABLE') {
+        throw new RpcError('HISTORY_INCOMPLETE', 'The full native transcript is unavailable.')
       }
-      content = Buffer.concat(parts).toString('utf8')
-    } finally { await handle.close() }
-  } catch (error) {
-    if (error instanceof RpcError) throw error
-    throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript could not be read.')
+      throw error
+    }))
+    const identity = (record: StepLogRecord) => JSON.stringify([record.step_index, record.type, record.created_at])
+    const complete = new Map(full.map(record => [identity(record), record]))
+    for (let index = 0; index < records.length; ++index) {
+      const record = records[index]!
+      if (!record.truncated_fields?.length) continue
+      const restored = complete.get(identity(record))
+      if (!restored || restored.truncated_fields?.length
+        || record.truncated_fields.some(field => !(field in restored))) {
+        throw new RpcError('HISTORY_INCOMPLETE', 'The full native transcript has not completed this record.')
+      }
+      records[index] = restored
+    }
   }
-
-  const lines = content.split('\n')
   const events: HydratedSessionEvent[] = []
   let currentSeq = 0
   let currentTurn = 0
@@ -84,22 +79,7 @@ export async function loadTranscriptEvents(
     })
   }
 
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    let record: StepLogRecord
-    try {
-      record = JSON.parse(trimmed) as StepLogRecord
-    } catch {
-      // Never let an incomplete append or corrupt record replace a good cache
-      // with a superficially successful, shorter history.
-      throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript contains an incomplete or invalid record.')
-    }
-    if (record === null || typeof record !== 'object' || typeof record.type !== 'string') {
-      throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript contains an invalid record.')
-    }
-    if (record.truncated_fields?.length) throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript reports truncated content.')
-
+  for (const record of records) {
     const time = record.created_at ? new Date(record.created_at).getTime() : Date.now()
 
     if (record.type === 'USER_INPUT') {
@@ -169,15 +149,16 @@ export async function loadTranscriptEvents(
         push('assistant/message', {
           turn: currentTurn,
           step: 1,
-        message: {
-          id: `${sessionId}:${record.step_index}`,
-          role: 'assistant',
-          content: contentBlocks,
-        },
-        // Harness trajectory timing expects every assistant message to carry
-        // an iterable stream, including messages restored from transcript.
-        stream: [],
-      }, time, true)
+          message: {
+            id: `${sessionId}:${record.step_index}`,
+            role: 'assistant',
+            content: contentBlocks,
+            source: { kind: 'model', provider: 'antigravity', model: typeof record.model === 'string' ? record.model : '' },
+          },
+          // The official reader requires both the model route and an iterable
+          // stream even when restoring history without token usage samples.
+          stream: [],
+        }, time, true)
       }
     }
   }
@@ -190,6 +171,45 @@ export async function loadTranscriptEvents(
   }
 
   return events
+}
+
+async function readTranscript(baseDir: string, conversationId: string, name: 'transcript.jsonl' | 'transcript_full.jsonl'): Promise<string> {
+  try {
+    const filePath = await transcriptPath(baseDir, conversationId, name)
+    if (filePath === undefined) throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript is unavailable.')
+    if ((await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript exceeds the history transfer limit.')
+    }
+    const handle = await fs.open(filePath, 'r')
+    try {
+      const parts: Buffer[] = []
+      let size = 0
+      while (true) {
+        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size))
+        const { bytesRead } = await handle.read(chunk)
+        if (!bytesRead) break
+        size += bytesRead
+        if (size > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError('HISTORY_TOO_LARGE', 'The native transcript exceeds the history transfer limit.')
+        parts.push(chunk.subarray(0, bytesRead))
+      }
+      return Buffer.concat(parts).toString('utf8')
+    } finally { await handle.close() }
+  } catch (error) {
+    if (error instanceof RpcError) throw error
+    throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript could not be read.')
+  }
+}
+
+function parseTranscript(content: string): StepLogRecord[] {
+  return content.split('\n').filter(line => line.trim()).map(line => {
+    let record: StepLogRecord
+    try { record = JSON.parse(line) as StepLogRecord }
+    catch { throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript contains an incomplete or invalid record.') }
+    if (!record || typeof record !== 'object' || typeof record.type !== 'string') {
+      throw new RpcError('HISTORY_INCOMPLETE', 'The native transcript contains an invalid record.')
+    }
+    return record
+  })
 }
 
 export interface DiscoveredSession {
@@ -401,11 +421,11 @@ function workspaceMatches(rawUris: string | undefined, requestedWorkspace: strin
 }
 
 /** Remote conversation ids can select only a real transcript inside the AGY brain. */
-async function transcriptPath(baseDir: string, conversationId: string): Promise<string | undefined> {
+async function transcriptPath(baseDir: string, conversationId: string, name: 'transcript.jsonl' | 'transcript_full.jsonl' = 'transcript.jsonl'): Promise<string | undefined> {
   if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return undefined
   try {
     const root = await fs.realpath(baseDir)
-    const expected = join(root, conversationId, '.system_generated', 'logs', 'transcript.jsonl')
+    const expected = join(root, conversationId, '.system_generated', 'logs', name)
     return await fs.realpath(expected) === expected ? expected : undefined
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined

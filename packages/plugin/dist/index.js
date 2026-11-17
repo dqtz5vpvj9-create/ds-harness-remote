@@ -96546,34 +96546,26 @@ function cleanUserPrompt(raw) {
   return raw.trim();
 }
 async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
-  let content = "";
-  try {
-    const filePath = await transcriptPath(baseDir, conversationId);
-    if (filePath === void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript is unavailable.");
-    if ((await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
-      throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
-    }
-    const handle = await fs3.open(filePath, "r");
-    try {
-      const parts = [];
-      let size2 = 0;
-      while (true) {
-        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size2));
-        const { bytesRead } = await handle.read(chunk);
-        if (!bytesRead) break;
-        size2 += bytesRead;
-        if (size2 > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
-        parts.push(chunk.subarray(0, bytesRead));
+  const records = parseTranscript(await readTranscript(baseDir, conversationId, "transcript.jsonl"));
+  if (records.some((record11) => record11.truncated_fields?.length)) {
+    const full = parseTranscript(await readTranscript(baseDir, conversationId, "transcript_full.jsonl").catch((error62) => {
+      if (error62 instanceof RpcError && error62.code === "HISTORY_UNAVAILABLE") {
+        throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript is unavailable.");
       }
-      content = Buffer.concat(parts).toString("utf8");
-    } finally {
-      await handle.close();
+      throw error62;
+    }));
+    const identity3 = (record11) => JSON.stringify([record11.step_index, record11.type, record11.created_at]);
+    const complete = new Map(full.map((record11) => [identity3(record11), record11]));
+    for (let index = 0; index < records.length; ++index) {
+      const record11 = records[index];
+      if (!record11.truncated_fields?.length) continue;
+      const restored = complete.get(identity3(record11));
+      if (!restored || restored.truncated_fields?.length || record11.truncated_fields.some((field) => !(field in restored))) {
+        throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript has not completed this record.");
+      }
+      records[index] = restored;
     }
-  } catch (error62) {
-    if (error62 instanceof RpcError) throw error62;
-    throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript could not be read.");
   }
-  const lines = content.split("\n");
   const events = [];
   let currentSeq = 0;
   let currentTurn = 0;
@@ -96590,19 +96582,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       }
     });
   };
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let record11;
-    try {
-      record11 = JSON.parse(trimmed);
-    } catch {
-      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an incomplete or invalid record.");
-    }
-    if (record11 === null || typeof record11 !== "object" || typeof record11.type !== "string") {
-      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an invalid record.");
-    }
-    if (record11.truncated_fields?.length) throw new RpcError("HISTORY_INCOMPLETE", "The native transcript reports truncated content.");
+  for (const record11 of records) {
     const time3 = record11.created_at ? new Date(record11.created_at).getTime() : Date.now();
     if (record11.type === "USER_INPUT") {
       if (turnOpen) {
@@ -96676,10 +96656,11 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
           message: {
             id: `${sessionId}:${record11.step_index}`,
             role: "assistant",
-            content: contentBlocks2
+            content: contentBlocks2,
+            source: { kind: "model", provider: "antigravity", model: typeof record11.model === "string" ? record11.model : "" }
           },
-          // Harness trajectory timing expects every assistant message to carry
-          // an iterable stream, including messages restored from transcript.
+          // The official reader requires both the model route and an iterable
+          // stream even when restoring history without token usage samples.
           stream: []
         }, time3, true);
       }
@@ -96691,6 +96672,48 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
     push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
   }
   return events;
+}
+async function readTranscript(baseDir, conversationId, name2) {
+  try {
+    const filePath = await transcriptPath(baseDir, conversationId, name2);
+    if (filePath === void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript is unavailable.");
+    if ((await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
+    }
+    const handle = await fs3.open(filePath, "r");
+    try {
+      const parts = [];
+      let size2 = 0;
+      while (true) {
+        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size2));
+        const { bytesRead } = await handle.read(chunk);
+        if (!bytesRead) break;
+        size2 += bytesRead;
+        if (size2 > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
+        parts.push(chunk.subarray(0, bytesRead));
+      }
+      return Buffer.concat(parts).toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript could not be read.");
+  }
+}
+function parseTranscript(content) {
+  return content.split("\n").filter((line) => line.trim()).map((line) => {
+    let record11;
+    try {
+      record11 = JSON.parse(line);
+    } catch {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an incomplete or invalid record.");
+    }
+    if (!record11 || typeof record11 !== "object" || typeof record11.type !== "string") {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an invalid record.");
+    }
+    return record11;
+  });
 }
 async function querySqliteJson(dbPath, sql, params = []) {
   try {
@@ -96865,11 +96888,11 @@ function workspaceMatches(rawUris, requestedWorkspace) {
     return false;
   }
 }
-async function transcriptPath(baseDir, conversationId) {
+async function transcriptPath(baseDir, conversationId, name2 = "transcript.jsonl") {
   if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
   try {
     const root2 = await fs3.realpath(baseDir);
-    const expected = join11(root2, conversationId, ".system_generated", "logs", "transcript.jsonl");
+    const expected = join11(root2, conversationId, ".system_generated", "logs", name2);
     return await fs3.realpath(expected) === expected ? expected : void 0;
   } catch (error62) {
     if (error62.code === "ENOENT") return void 0;

@@ -82,7 +82,10 @@ describe('TranscriptLoader', () => {
               content: [{ type: 'text', text: '这个主机咋样' }],
             })
             expect(events.find((e) => e.event.type === 'assistant/message')?.event.data).toMatchObject({
-              message: { content: [{ type: 'text', text: '主机状态正常。' }] },
+              message: {
+                content: [{ type: 'text', text: '主机状态正常。' }],
+                source: { kind: 'model', provider: 'antigravity', model: '' },
+              },
               stream: [],
             })
           },
@@ -337,4 +340,45 @@ describe('TranscriptLoader', () => {
     await expect(discoverAntigravitySessions('', 30, base, dbPath)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
   })
 
+})
+
+it('restores truncated native records from the full companion without losing later messages', async () => {
+  const full = { type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt,
+    content: 'Complete answer '.repeat(1000), thinking: 'Complete reasoning',
+    tool_calls: [{ name: 'shell', args: { command: 'printf complete' }, result: 'complete output', status: 'SUCCESS' }] }
+  await writeTranscript('conversation', [
+    { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Read history' },
+    { ...full, content: 'Complete…', tool_calls: [], truncated_fields: ['content', 'tool_calls'] },
+    { type: 'PLANNER_RESPONSE', step_index: 3, created_at: createdAt, content: 'Newer than full companion' },
+  ])
+  const path = join(base, 'conversation', '.system_generated', 'logs', 'transcript_full.jsonl')
+  await writeFile(path, JSON.stringify(full) + '\n')
+  const events = await loadTranscriptEvents('conversation', 'remote', base)
+  const messages = events.filter(row => row.event.type === 'assistant/message').map(row => row.event.data)
+  expect(messages).toMatchObject([
+    { message: { content: [{ type: 'reasoning', text: full.thinking }, { type: 'text', text: full.content }] } },
+    { message: { content: [{ type: 'text', text: 'Newer than full companion' }] } },
+  ])
+  expect(events.find(row => row.event.type === 'tool/result')?.event.data).toMatchObject({
+    message: { content: [{ content: [{ text: 'complete output' }] }] },
+  })
+  for (const wrong of [{ ...full, step_index: 7 }, { ...full, type: 'USER_INPUT' },
+    { ...full, created_at: '2026-10-08T00:00:00Z' }, { ...full, truncated_fields: ['content'] },
+    { ...full, content: undefined }]) {
+    await writeFile(path, JSON.stringify(wrong) + '\n')
+    await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  }
+  await writeFile(path, JSON.stringify(full) + '\n{unfinished')
+  await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  await truncate(path, MAX_AGENT_ACP_TRANSFER_BYTES + 1)
+  await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_TOO_LARGE' })
+})
+
+it('does not follow a full transcript symlink outside the native conversation', async () => {
+  await writeTranscript('conversation', [{ type: 'PLANNER_RESPONSE', step_index: 1, created_at: createdAt,
+    content: 'partial', truncated_fields: ['content'] }])
+  const outside = join(base, 'outside.jsonl')
+  await writeFile(outside, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 1, created_at: createdAt, content: 'outside' }))
+  await symlink(outside, join(base, 'conversation', '.system_generated', 'logs', 'transcript_full.jsonl'))
+  await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
 })
