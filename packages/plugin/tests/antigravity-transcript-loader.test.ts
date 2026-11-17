@@ -122,6 +122,46 @@ describe('TranscriptLoader', () => {
     )
   }, 15000)
 
+  it('preserves every native planner response instead of overwriting one reader step', async () => {
+    await writeTranscript('many-steps', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Inspect then explain' },
+      { type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt, content: 'First finding' },
+      { type: 'PLANNER_RESPONSE', step_index: 3, created_at: createdAt,
+        tool_calls: [{ name: 'view_file', args: { path: 'fixture.txt' }, result: 'File contents' }] },
+      { type: 'PLANNER_RESPONSE', step_index: 4, created_at: createdAt, content: 'Second finding' },
+      { type: 'USER_INPUT', step_index: 5, created_at: createdAt, content: 'Continue' },
+      { type: 'PLANNER_RESPONSE', step_index: 6, created_at: createdAt, content: 'Final finding' },
+    ])
+    const events = await loadTranscriptEvents('many-steps', 'acp:many-steps', base)
+    const messages = events.filter(e => e.event.type === 'assistant/message').map(e => e.event.data as any)
+    expect(messages.filter(m => m.message.content[0].type === 'text').map(m => [m.turn, m.step, m.message.content[0].text])).toEqual([
+      [1, 1, 'First finding'], [1, 3, 'Second finding'], [2, 1, 'Final finding'],
+    ])
+    const tool = events.find(e => e.event.type === 'tool/call')!.event.data as any
+    const result = events.find(e => e.event.type === 'tool/result')!.event.data as any
+    expect([tool.turn, tool.step, result.turn, result.step]).toEqual([1, 2, 1, 2])
+    expect(messages.find(m => m.step === 2)?.message.content).toEqual([{ type: 'tool-call', id: tool.callId, name: tool.name, arguments: tool.arguments }])
+    expect(events.filter(e => e.event.type === 'step/start').map(e => e.event.data)).toEqual(
+      events.filter(e => e.event.type === 'step/end').map(e => e.event.data),
+    )
+  })
+
+  it('binds native GENERIC results to the exact planner batch and preserves failures', async () => {
+    const planner = { type: 'PLANNER_RESPONSE', step_index: 1, created_at: createdAt,
+      tool_calls: [{ name: 'shell', args: {} }, { name: 'view_file', args: {} }] }
+    const failed = { type: 'GENERIC', step_index: 2, created_at: createdAt, status: 'DONE',
+      content: 'Created At: example\nCompleted At: example\nCommand exited with code -1.\n\nfailure output' }
+    const success = { type: 'GENERIC', step_index: 3, created_at: createdAt, status: 'DONE', content: 'complete file contents' }
+    await writeTranscript('native-results', [planner, failed, success])
+    const events = await loadTranscriptEvents('native-results', 'acp:native-results', base)
+    expect(events.filter(e => e.event.type === 'tool/result').map(e => e.event.data)).toMatchObject([
+      { message: { content: [{ toolCallId: '1:shell', isError: true, content: [{ text: failed.content }] }] } },
+      { message: { content: [{ toolCallId: '1:view_file', content: [{ text: success.content }] }] } },
+    ])
+    await writeTranscript('native-results', [planner, failed])
+    await expect(loadTranscriptEvents('native-results', 'acp:native-results', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  })
+
   it('discovers workspace-scoped sessions from isolated durable sources', async () => {
     await runScenarios(
       [
@@ -313,7 +353,9 @@ describe('TranscriptLoader', () => {
       { message: { content: [{ toolCallId: '2:shell:1', isError: true, content: [{ text: '{"exitCode":2}' }] }] } },
     ])
     expect(events.find(row => row.event.type === 'assistant/message')?.event.data).toMatchObject({
-      message: { content: [{ type: 'reasoning', text: 'The only recorded content' }] },
+      message: { content: [{ type: 'reasoning', text: 'The only recorded content' },
+        { type: 'tool-call', id: '2:shell', name: 'shell', arguments: '{"command":"first"}' },
+        { type: 'tool-call', id: '2:shell:1', name: 'shell', arguments: '{"command":"second"}' }] },
     })
   })
 
@@ -356,7 +398,8 @@ it('restores truncated native records from the full companion without losing lat
   const events = await loadTranscriptEvents('conversation', 'remote', base)
   const messages = events.filter(row => row.event.type === 'assistant/message').map(row => row.event.data)
   expect(messages).toMatchObject([
-    { message: { content: [{ type: 'reasoning', text: full.thinking }, { type: 'text', text: full.content }] } },
+    { message: { content: [{ type: 'reasoning', text: full.thinking }, { type: 'text', text: full.content },
+      { type: 'tool-call', id: '2:shell', name: 'shell', arguments: '{"command":"printf complete"}' }] } },
     { message: { content: [{ type: 'text', text: 'Newer than full companion' }] } },
   ])
   expect(events.find(row => row.event.type === 'tool/result')?.event.data).toMatchObject({

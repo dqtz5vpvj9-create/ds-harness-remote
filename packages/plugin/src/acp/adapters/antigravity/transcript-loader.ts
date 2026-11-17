@@ -65,6 +65,8 @@ export async function loadTranscriptEvents(
   let currentSeq = 0
   let currentTurn = 0
   let turnOpen = false
+  let currentStep = 1
+  let plannerSeen = false
 
   const push = (type: string, data: unknown, time: number, surface = false) => {
     events.push({
@@ -79,19 +81,21 @@ export async function loadTranscriptEvents(
     })
   }
 
-  for (const record of records) {
+  for (const [recordIndex, record] of records.entries()) {
     const time = record.created_at ? new Date(record.created_at).getTime() : Date.now()
 
     if (record.type === 'USER_INPUT') {
       if (turnOpen) {
-        push('step/end', { turn: currentTurn, step: 1 }, time)
+        push('step/end', { turn: currentTurn, step: currentStep }, time)
         push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, time)
         turnOpen = false
       }
       currentTurn += 1
+      currentStep = 1
+      plannerSeen = false
       turnOpen = true
       push('turn/start', { turn: currentTurn }, time)
-      push('step/start', { turn: currentTurn, step: 1 }, time)
+      push('step/start', { turn: currentTurn, step: currentStep }, time)
 
       const text = cleanUserPrompt(record.content)
       const images = await Promise.all(agyImageReferences(record.content ?? '').map(path => readAgyImage(conversationId, path)))
@@ -107,48 +111,37 @@ export async function loadTranscriptEvents(
         currentTurn += 1
         turnOpen = true
         push('turn/start', { turn: currentTurn }, time)
-        push('step/start', { turn: currentTurn, step: 1 }, time)
+        push('step/start', { turn: currentTurn, step: currentStep }, time)
       }
 
-      if (Array.isArray(record.tool_calls)) {
-        const names = new Map<string, number>()
-        for (const call of record.tool_calls) {
-          const toolName = (typeof call.name === 'string' && call.name.length > 0) ? call.name : 'tool'
-          const index = names.get(toolName) ?? 0
-          names.set(toolName, index + 1)
-          const callId = `${record.step_index}:${toolName}${index ? `:${index}` : ''}`
-          push('tool/call', {
-            turn: currentTurn,
-            step: 1,
-            callId,
-            name: toolName,
-            arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}',
-            toolCallId: callId,
-            toolName,
-            status: call.status === 'ERROR' ? 'failed' : call.status === 'CALLING' || call.status === 'EXECUTING' ? 'pending' : 'finished',
-          }, time, false)
-          if (call.result !== undefined) push('tool/result', {
-            turn: currentTurn, step: 1, message: {
-              id: `${callId}:result`, role: 'user', content: [{
-                type: 'tool-result', toolCallId: callId,
-                content: [{ type: 'text', text: typeof call.result === 'string' ? call.result : JSON.stringify(call.result) }],
-                ...(call.status === 'ERROR' ? { isError: true } : {}),
-              }], source: { kind: 'tool', callId },
-            },
-          }, time, true)
-        }
+      // A planner record is a distinct native step, not a revision of the
+      // previous assistant message. DSH keys its assistant nodes by turn/step.
+      if (plannerSeen) {
+        push('step/end', { turn: currentTurn, step: currentStep }, time)
+        currentStep += 1
+        push('step/start', { turn: currentTurn, step: currentStep }, time)
       }
+      plannerSeen = true
 
-      if (record.content?.trim() || record.thinking?.trim()) {
-        const contentBlocks: Array<{ type: string; text: string }> = []
+      if (record.content?.trim() || record.thinking?.trim() || record.tool_calls?.length) {
+        const contentBlocks: Array<Record<string, unknown>> = []
         if (record.thinking && record.thinking.trim() !== '') {
           contentBlocks.push({ type: 'reasoning', text: record.thinking.trim() })
         }
         if (record.content?.trim()) contentBlocks.push({ type: 'text', text: record.content })
+        const names = new Map<string, number>()
+        for (const call of record.tool_calls ?? []) {
+          const name = typeof call.name === 'string' && call.name.length > 0 ? call.name : 'tool'
+          const index = names.get(name) ?? 0
+          names.set(name, index + 1)
+          contentBlocks.push({ type: 'tool-call', id: `${record.step_index}:${name}${index ? `:${index}` : ''}`,
+            name, arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}' })
+        }
+
 
         push('assistant/message', {
           turn: currentTurn,
-          step: 1,
+          step: currentStep,
           message: {
             id: `${sessionId}:${record.step_index}`,
             role: 'assistant',
@@ -160,13 +153,61 @@ export async function loadTranscriptEvents(
           stream: [],
         }, time, true)
       }
+
+      if (Array.isArray(record.tool_calls)) {
+        // Native AGY logs tool returns as ordered GENERIC records following
+        // their planner batch. Never bind a mismatched batch to arbitrary calls.
+        const returns: StepLogRecord[] = []
+        for (let index = recordIndex + 1; index < records.length; index++) {
+          const next = records[index]!
+          if (next.type === 'PLANNER_RESPONSE' || next.type === 'USER_INPUT') break
+          if (next.type === 'GENERIC') returns.push(next)
+        }
+        if (returns.length && returns.length !== record.tool_calls.length) {
+          throw new RpcError('HISTORY_INCOMPLETE', 'Native tool returns do not match their planner batch.')
+        }
+        let toolIndex = 0
+        const names = new Map<string, number>()
+        for (const call of record.tool_calls) {
+          const nativeReturn = returns[toolIndex++]
+          const output = call.result ?? nativeReturn?.content
+          const header = typeof output === 'string' ? output.replace(/^(?:(?:Created|Completed) At: [^\n]*\n)+/, '') : ''
+          const exitCode = /^Command exited with code (-?\d+)\./.exec(header)?.[1]
+          const failed = call.status === 'ERROR' || nativeReturn?.status === 'ERROR' || (exitCode !== undefined && Number(exitCode) !== 0)
+          const toolName = (typeof call.name === 'string' && call.name.length > 0) ? call.name : 'tool'
+          const index = names.get(toolName) ?? 0
+          names.set(toolName, index + 1)
+          const callId = `${record.step_index}:${toolName}${index ? `:${index}` : ''}`
+          push('tool/call', {
+            turn: currentTurn,
+            step: currentStep,
+            callId,
+            name: toolName,
+            arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}',
+            toolCallId: callId,
+            toolName,
+            status: failed ? 'failed' : call.status === 'CALLING' || call.status === 'EXECUTING' ? 'pending' : 'finished',
+          }, time, false)
+          if (output !== undefined) push('tool/result', {
+            turn: currentTurn, step: currentStep, message: {
+              id: `${callId}:result`, role: 'user', content: [{
+                type: 'tool-result', toolCallId: callId,
+                content: [{ type: 'text', text: typeof output === 'string' ? output : JSON.stringify(output) }],
+                ...(failed ? { isError: true } : {}),
+              }], source: { kind: 'tool', callId },
+            },
+          }, nativeReturn?.created_at ? new Date(nativeReturn.created_at).getTime() : time, true)
+        }
+      }
+
+
     }
   }
 
   if (turnOpen) {
     // Hydration must not extend a settled turn until the time of the read.
     const settledAt = events.at(-1)?.event.time ?? Date.now()
-    push('step/end', { turn: currentTurn, step: 1 }, settledAt)
+    push('step/end', { turn: currentTurn, step: currentStep }, settledAt)
     push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, settledAt)
   }
 

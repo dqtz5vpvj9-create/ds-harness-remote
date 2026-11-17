@@ -96570,6 +96570,8 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
   let currentSeq = 0;
   let currentTurn = 0;
   let turnOpen = false;
+  let currentStep = 1;
+  let plannerSeen = false;
   const push2 = (type, data2, time3, surface = false) => {
     events.push({
       type: "event",
@@ -96582,18 +96584,20 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       }
     });
   };
-  for (const record11 of records) {
+  for (const [recordIndex, record11] of records.entries()) {
     const time3 = record11.created_at ? new Date(record11.created_at).getTime() : Date.now();
     if (record11.type === "USER_INPUT") {
       if (turnOpen) {
-        push2("step/end", { turn: currentTurn, step: 1 }, time3);
+        push2("step/end", { turn: currentTurn, step: currentStep }, time3);
         push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time3);
         turnOpen = false;
       }
       currentTurn += 1;
+      currentStep = 1;
+      plannerSeen = false;
       turnOpen = true;
       push2("turn/start", { turn: currentTurn }, time3);
-      push2("step/start", { turn: currentTurn, step: 1 }, time3);
+      push2("step/start", { turn: currentTurn, step: currentStep }, time3);
       const text = cleanUserPrompt(record11.content);
       const images = await Promise.all(agyImageReferences(record11.content ?? "").map((path) => readAgyImage(conversationId, path)));
       if (images.some((image) => image === void 0)) throw new RpcError("HISTORY_INCOMPLETE", "A native transcript image is unavailable.");
@@ -96608,51 +96612,35 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
         currentTurn += 1;
         turnOpen = true;
         push2("turn/start", { turn: currentTurn }, time3);
-        push2("step/start", { turn: currentTurn, step: 1 }, time3);
+        push2("step/start", { turn: currentTurn, step: currentStep }, time3);
       }
-      if (Array.isArray(record11.tool_calls)) {
-        const names = /* @__PURE__ */ new Map();
-        for (const call of record11.tool_calls) {
-          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const index = names.get(toolName) ?? 0;
-          names.set(toolName, index + 1);
-          const callId = `${record11.step_index}:${toolName}${index ? `:${index}` : ""}`;
-          push2("tool/call", {
-            turn: currentTurn,
-            step: 1,
-            callId,
-            name: toolName,
-            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
-            toolCallId: callId,
-            toolName,
-            status: call.status === "ERROR" ? "failed" : call.status === "CALLING" || call.status === "EXECUTING" ? "pending" : "finished"
-          }, time3, false);
-          if (call.result !== void 0) push2("tool/result", {
-            turn: currentTurn,
-            step: 1,
-            message: {
-              id: `${callId}:result`,
-              role: "user",
-              content: [{
-                type: "tool-result",
-                toolCallId: callId,
-                content: [{ type: "text", text: typeof call.result === "string" ? call.result : JSON.stringify(call.result) }],
-                ...call.status === "ERROR" ? { isError: true } : {}
-              }],
-              source: { kind: "tool", callId }
-            }
-          }, time3, true);
-        }
+      if (plannerSeen) {
+        push2("step/end", { turn: currentTurn, step: currentStep }, time3);
+        currentStep += 1;
+        push2("step/start", { turn: currentTurn, step: currentStep }, time3);
       }
-      if (record11.content?.trim() || record11.thinking?.trim()) {
+      plannerSeen = true;
+      if (record11.content?.trim() || record11.thinking?.trim() || record11.tool_calls?.length) {
         const contentBlocks2 = [];
         if (record11.thinking && record11.thinking.trim() !== "") {
           contentBlocks2.push({ type: "reasoning", text: record11.thinking.trim() });
         }
         if (record11.content?.trim()) contentBlocks2.push({ type: "text", text: record11.content });
+        const names = /* @__PURE__ */ new Map();
+        for (const call of record11.tool_calls ?? []) {
+          const name2 = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
+          const index = names.get(name2) ?? 0;
+          names.set(name2, index + 1);
+          contentBlocks2.push({
+            type: "tool-call",
+            id: `${record11.step_index}:${name2}${index ? `:${index}` : ""}`,
+            name: name2,
+            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}"
+          });
+        }
         push2("assistant/message", {
           turn: currentTurn,
-          step: 1,
+          step: currentStep,
           message: {
             id: `${sessionId}:${record11.step_index}`,
             role: "assistant",
@@ -96664,11 +96652,60 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
           stream: []
         }, time3, true);
       }
+      if (Array.isArray(record11.tool_calls)) {
+        const returns = [];
+        for (let index = recordIndex + 1; index < records.length; index++) {
+          const next = records[index];
+          if (next.type === "PLANNER_RESPONSE" || next.type === "USER_INPUT") break;
+          if (next.type === "GENERIC") returns.push(next);
+        }
+        if (returns.length && returns.length !== record11.tool_calls.length) {
+          throw new RpcError("HISTORY_INCOMPLETE", "Native tool returns do not match their planner batch.");
+        }
+        let toolIndex = 0;
+        const names = /* @__PURE__ */ new Map();
+        for (const call of record11.tool_calls) {
+          const nativeReturn = returns[toolIndex++];
+          const output2 = call.result ?? nativeReturn?.content;
+          const header = typeof output2 === "string" ? output2.replace(/^(?:(?:Created|Completed) At: [^\n]*\n)+/, "") : "";
+          const exitCode = /^Command exited with code (-?\d+)\./.exec(header)?.[1];
+          const failed = call.status === "ERROR" || nativeReturn?.status === "ERROR" || exitCode !== void 0 && Number(exitCode) !== 0;
+          const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
+          const index = names.get(toolName) ?? 0;
+          names.set(toolName, index + 1);
+          const callId = `${record11.step_index}:${toolName}${index ? `:${index}` : ""}`;
+          push2("tool/call", {
+            turn: currentTurn,
+            step: currentStep,
+            callId,
+            name: toolName,
+            arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
+            toolCallId: callId,
+            toolName,
+            status: failed ? "failed" : call.status === "CALLING" || call.status === "EXECUTING" ? "pending" : "finished"
+          }, time3, false);
+          if (output2 !== void 0) push2("tool/result", {
+            turn: currentTurn,
+            step: currentStep,
+            message: {
+              id: `${callId}:result`,
+              role: "user",
+              content: [{
+                type: "tool-result",
+                toolCallId: callId,
+                content: [{ type: "text", text: typeof output2 === "string" ? output2 : JSON.stringify(output2) }],
+                ...failed ? { isError: true } : {}
+              }],
+              source: { kind: "tool", callId }
+            }
+          }, nativeReturn?.created_at ? new Date(nativeReturn.created_at).getTime() : time3, true);
+        }
+      }
     }
   }
   if (turnOpen) {
     const settledAt = events.at(-1)?.event.time ?? Date.now();
-    push2("step/end", { turn: currentTurn, step: 1 }, settledAt);
+    push2("step/end", { turn: currentTurn, step: currentStep }, settledAt);
     push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
   }
   return events;

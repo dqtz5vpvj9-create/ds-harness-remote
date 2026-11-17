@@ -4,6 +4,7 @@
 
 ## Fork — Unreleased
 
+- Preserve separate Antigravity planner steps and their native tool returns in the DSH reader instead of overwriting earlier process content or showing completed tools as stopped.
 - Restore compacted Antigravity history from its full native transcript and include model attribution required by the DSH reader, fixing conversations that failed to open.
 - 从原生完整记录恢复 Antigravity 缩略历史，并补齐 DSH 阅读器必需的模型来源字段，修复已有会话无法打开的问题。
 - Provide an optional windowless Windows AGY launcher that reuses the same user's existing login from a background Host, forwards CLI streams, and cleans up child processes on cancellation.

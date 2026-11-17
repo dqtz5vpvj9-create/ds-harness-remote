@@ -1,4 +1,4 @@
-export type StepType = 'USER_INPUT' | 'PLANNER_RESPONSE' | 'SYSTEM'
+export type StepType = 'USER_INPUT' | 'PLANNER_RESPONSE' | 'SYSTEM' | 'GENERIC' | 'ERROR_MESSAGE' | 'CHECKPOINT'
 export type StepStatus = 'RUNNING' | 'DONE' | 'ERROR'
 
 export interface ToolCallPayload {
