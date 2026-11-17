@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-user-questions/types';
 import { nativeAsyncQuestions, nativeQuestionReplies } from '../shared/native-async-questions.ts';
 
 /** Reproject typed native questions and human replies without their transport fallback text. */
-export const CODEX_HISTORY_PROJECTION_VERSION = 8;
+export const CODEX_HISTORY_PROJECTION_VERSION = 9;
 export interface CodexHistoryOptions {
     userContent?: (turnId: string, item: NativeItem) => ContentBlock[] | undefined;
     toolContent?: (turnId: string, item: NativeItem) => ContentBlock[] | undefined;
@@ -142,9 +142,13 @@ export class CodexHistory {
             const nativeTool = nativeToolPresentation(item, presentationContent);
             const tool = nativeTool && (this.options.toolPresentation?.(turnId, item, nativeTool) ?? nativeTool);
             if (item.type === 'agentMessage' && item.delivery === 'async' && nativeAsyncQuestions(item.questions)) {
-                // The official question composer owns this structured content.
-                // Keep the native anchor, without duplicating its textual menu.
-                putMessage([]);
+                // Keep the source question readable after the answer panel is
+                // hidden or becomes historical. The panel is a presentation,
+                // not the owner of the original message.
+                const questions = nativeAsyncQuestions(item.questions)!;
+                const text = nativeText(item.text) || questions.map(question => [question.title,
+                    ...(question.options ?? []).map(option => `- ${option}`)].join('\n')).join('\n\n');
+                putMessage([{ type: 'text', text }]);
             } else if (item.type === 'agentMessage' || item.type === 'plan') putMessage([{ type: 'text', text: item.type === 'plan'
                 ? `<proposed_plan>\n${nativeText(item.text)}\n</proposed_plan>` : nativeText(item.text) }]);
             else if (item.type === 'reasoning') {

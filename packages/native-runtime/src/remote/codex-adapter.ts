@@ -875,7 +875,7 @@ export class DirectCodexAdapter implements SourceAdapter {
             for (const group of accepted) {
                 const entries = group.entries.map(entry => this.monotoneSnapshot(history, entry, group.terminal)).filter((entry): entry is NativeItemEntry => entry !== undefined);
                 const hash = createHash('sha256').update(owner.session.id).digest('hex');
-                retainSelectedLegacyImages(['.v7.sqlite', '.v6.sqlite', '.v5.sqlite', '.v4.sqlite', '.v3.sqlite', '.v2.sqlite', '.sqlite'].map(suffix => join(this.directory, 'history', `${hash}${suffix}`)),
+                retainSelectedLegacyImages(['.v8.sqlite', '.v7.sqlite', '.v6.sqlite', '.v5.sqlite', '.v4.sqlite', '.v3.sqlite', '.v2.sqlite', '.sqlite'].map(suffix => join(this.directory, 'history', `${hash}${suffix}`)),
                     index, owner.session, owner.native, entries);
                 history.acceptItems(session, entries, group.terminal);
                 for (const item of group.items) index.cache(`source-revision:${item.turnId}:${item.itemId}`, item.revision);
@@ -991,7 +991,7 @@ export class DirectCodexAdapter implements SourceAdapter {
     private cachedPending(owner: ThreadOwner): CachedPendingApproval[] {
         return this.history(owner).index.cached<CachedPendingApproval[]>(NATIVE_PENDING_REQUESTS) ?? [];
     }
-    /** v7 -> v8 changes display material, not the native source. Carry only
+    /** Projection upgrades change display material, not the native source. Carry only
      * previously received blocking calls from the exact same source snapshot.
      * recoverPending still verifies daemon, native anchor and live wait state. */
     private migratePending(owner: ThreadOwner): void {
@@ -1000,9 +1000,11 @@ export class DirectCodexAdapter implements SourceAdapter {
         const coordinates = index.cached<string>('native-source-coordinates');
         if (!coordinates) return;
         const hash = createHash('sha256').update(owner.session.id).digest('hex');
-        let previous: DatabaseSync | undefined, records: CachedPendingApproval[] = [];
-        try {
-            previous = new DatabaseSync(join(this.directory, 'history', `${hash}.v7.sqlite`), { readOnly: true });
+        let records: CachedPendingApproval[] = [];
+        for (const version of [8, 7]) {
+          let previous: DatabaseSync | undefined;
+          try {
+            previous = new DatabaseSync(join(this.directory, 'history', `${hash}.v${version}.sqlite`), { readOnly: true });
             const metadata = (key: string) => (previous!.prepare('SELECT value FROM metadata WHERE key=?').get(key) as { value: string } | undefined)?.value;
             const cached = (key: string) => (previous!.prepare('SELECT value FROM native_cache WHERE key=?').get(key) as { value: string } | undefined)?.value;
             const session = metadata('session'), epoch = metadata('epoch'), sourceCoordinates = cached('native-source-coordinates');
@@ -1016,9 +1018,11 @@ export class DirectCodexAdapter implements SourceAdapter {
                     && isRecord(record.request.params) && record.request.params.threadId === owner.native.id
                     && isRecord(record.anchor) && record.anchor.threadId === owner.native.id)
                     .map(record => ({ ...record, epoch: index.epoch }));
+                break;
             }
-        } catch { /* Missing or unverifiable evidence never creates a native request. */ }
-        finally { previous?.close(); }
+          } catch { /* Missing or unverifiable evidence never creates a native request. */ }
+          finally { previous?.close(); }
+        }
         index.edit(owner.session, () => index.cache(NATIVE_PENDING_REQUESTS, records));
     }
     private async recoverAsyncQuestions(owner: ThreadOwner, signal: AbortSignal): Promise<void> {

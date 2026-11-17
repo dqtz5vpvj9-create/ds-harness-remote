@@ -97,7 +97,7 @@ async function fixture(t: TestContext) {
             if ('daemon' in next) daemon = next.daemon; generation = next.generation ?? generation;
             adapter = make(); return adapter.read({ sessionId });
         },
-        async upgradeProjection(invalidate?: 'coordinates' | 'epoch') {
+        async upgradeProjection(invalidate?: 'coordinates' | 'epoch', version = 7) {
             await adapter.dispose();
             if (invalidate) {
                 const db = new DatabaseSync(indexPath);
@@ -106,7 +106,7 @@ async function fixture(t: TestContext) {
                     else db.prepare('UPDATE metadata SET value=? WHERE key=?').run('different-original-epoch', 'epoch');
                 } finally { db.close(); }
             }
-            await rename(indexPath, indexPath.replace(`.v${CODEX_HISTORY_PROJECTION_VERSION}.sqlite`, '.v7.sqlite'));
+            await rename(indexPath, indexPath.replace(`.v${CODEX_HISTORY_PROJECTION_VERSION}.sqlite`, `.v${version}.sqlite`));
             adapter = make(); return adapter.read({ sessionId });
         },
         loseOutcome() { outcome = 'unknown'; },
@@ -139,6 +139,13 @@ test('v7 display-cache upgrade preserves a received blocking question only after
 for (const invalid of ['coordinates', 'epoch'] as const) test(`v7 pending migration rejects changed ${invalid} instead of relaxing the old evidence`, async t => {
     const f = await fixture(t); await f.receive();
     assert.equal((await f.upgradeProjection(invalid)).session.pendingRequests.length, 0);
+    assert.deepEqual(f.writes, []); assert.deepEqual(f.responses, []);
+});
+
+test('v8 display-cache upgrade restores an exact live blocking request without a source write', async t => {
+    const f = await fixture(t); await f.receive();
+    const restored = await f.upgradeProjection(undefined, 8);
+    assert.equal(restored.session.pendingRequests.length, 1);
     assert.deepEqual(f.writes, []); assert.deepEqual(f.responses, []);
 });
 

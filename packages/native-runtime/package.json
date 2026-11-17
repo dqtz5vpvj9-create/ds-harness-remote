@@ -1,6 +1,6 @@
 {
   "name": "@dsh-remote/native-runtime",
-  "version": "0.1.0-hhpi.7",
+  "version": "0.1.0-hhpi.8",
   "description": "Source-owned native agent history, operations and DSH projection shared by Remote and HHPI.",
   "type": "module",
   "license": "AGPL-3.0-only",
