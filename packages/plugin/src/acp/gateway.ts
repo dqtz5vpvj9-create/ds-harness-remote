@@ -28,7 +28,7 @@ import {
   sessionIdFromParams,
   type AllowedAcpMethod,
 } from './method-policy.js'
-import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { discoverAntigravitySessions, discoverAntigravityWorkspaces, isUninitializedAntigravityTranscript, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
@@ -490,7 +490,14 @@ export class AcpRemoteGateway {
         return { events, ...(preset ? { permissionPreset: preset } : {}) }
       }
       if (backend !== 'antigravity') return { events: [] }
-      const events = await loadTranscriptEvents(conversationId, rawSessionId)
+      const events = await loadTranscriptEvents(conversationId, rawSessionId).catch(async error => {
+        if (error instanceof RpcError && error.code === 'HISTORY_UNAVAILABLE'
+          && this.sessionCwds.get(conversationId)?.backend === 'antigravity'
+          && await isUninitializedAntigravityTranscript(conversationId)) {
+          return []
+        }
+        throw error
+      })
       this.logger.info('ACP session history fetched', {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length,

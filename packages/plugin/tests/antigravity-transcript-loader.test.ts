@@ -159,7 +159,20 @@ describe('TranscriptLoader', () => {
       { message: { content: [{ toolCallId: '1:view_file', content: [{ text: success.content }] }] } },
     ])
     await writeTranscript('native-results', [planner, failed])
-    await expect(loadTranscriptEvents('native-results', 'acp:native-results', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+    const partialLive = await loadTranscriptEvents('native-results', 'acp:native-results', base)
+    expect(partialLive.filter(e => e.event.type === 'tool/call').map(e => e.event.data)).toMatchObject([
+      { callId: '1:shell', status: 'failed' },
+      { callId: '1:view_file', status: 'pending' },
+    ])
+    expect(partialLive.filter(e => e.event.type === 'tool/result')).toHaveLength(1)
+
+    await writeTranscript('native-results', [planner, failed, { type: 'USER_INPUT', step_index: 4, created_at: createdAt, content: 'continue' }])
+    const interrupted = await loadTranscriptEvents('native-results', 'acp:native-results', base)
+    expect(interrupted.filter(e => e.event.type === 'tool/call').map(e => e.event.data)).toMatchObject([
+      { callId: '1:shell', status: 'failed' },
+      { callId: '1:view_file', status: 'failed' },
+    ])
+    expect(interrupted.filter(e => e.event.type === 'tool/result')).toHaveLength(2)
   })
 
   it('discovers workspace-scoped sessions from isolated durable sources', async () => {

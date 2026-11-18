@@ -204,7 +204,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const session = this.sessions.get(id)
     if (!session) throw new Error('The native session was not found in this backend catalog.')
     await this.hydrateSession(session)
-    if (session.staleHistory) throw new Error('Authoritative native history is unavailable; the retained history has not been replaced.')
+    if (session.staleHistory && session.events.length === 0) throw new Error('Authoritative native history is unavailable; the retained history has not been replaced.')
     return { ...this.sourceMetadata(session), entries: structuredClone(session.events) }
   }
 

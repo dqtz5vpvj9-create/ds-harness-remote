@@ -71037,7 +71037,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const session2 = this.sessions.get(id6);
     if (!session2) throw new Error("The native session was not found in this backend catalog.");
     await this.hydrateSession(session2);
-    if (session2.staleHistory) throw new Error("Authoritative native history is unavailable; the retained history has not been replaced.");
+    if (session2.staleHistory && session2.events.length === 0) throw new Error("Authoritative native history is unavailable; the retained history has not been replaced.");
     return { ...this.sourceMetadata(session2), entries: structuredClone(session2.events) };
   }
   async sourceCreate(cwd2, signal) {
@@ -96585,6 +96585,9 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       const record11 = records[index];
       if (!record11.truncated_fields?.length) continue;
       const restored = complete.get(identity3(record11));
+      if (!restored && index === records.length - 1 && records.length > 1 && complete.size > 0) {
+        continue;
+      }
       if (!restored || restored.truncated_fields?.length || record11.truncated_fields.some((field) => !(field in restored))) {
         throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript has not completed this record.");
       }
@@ -96679,22 +96682,26 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       }
       if (Array.isArray(record11.tool_calls)) {
         const returns = [];
+        let settledBatch = false;
         for (let index = recordIndex + 1; index < records.length; index++) {
           const next = records[index];
-          if (next.type === "PLANNER_RESPONSE" || next.type === "USER_INPUT") break;
+          if (next.type === "PLANNER_RESPONSE" || next.type === "USER_INPUT") {
+            settledBatch = true;
+            break;
+          }
           if (next.type === "GENERIC") returns.push(next);
-        }
-        if (returns.length && returns.length !== record11.tool_calls.length) {
-          throw new RpcError("HISTORY_INCOMPLETE", "Native tool returns do not match their planner batch.");
         }
         let toolIndex = 0;
         const names = /* @__PURE__ */ new Map();
         for (const call of record11.tool_calls) {
-          const nativeReturn = returns[toolIndex++];
-          const output2 = call.result ?? nativeReturn?.content;
+          const nativeReturn = toolIndex < returns.length ? returns[toolIndex] : void 0;
+          toolIndex += 1;
+          const missingSettledReturn = settledBatch && returns.length > 0 && nativeReturn === void 0 && call.result === void 0;
+          const pendingLiveReturn = !settledBatch && returns.length > 0 && nativeReturn === void 0 && call.result === void 0;
+          const output2 = call.result ?? nativeReturn?.content ?? (missingSettledReturn ? "Tool execution was interrupted before returning output." : void 0);
           const header = typeof output2 === "string" ? output2.replace(/^(?:(?:Created|Completed) At: [^\n]*\n)+/, "") : "";
           const exitCode = /^Command exited with code (-?\d+)\./.exec(header)?.[1];
-          const failed = call.status === "ERROR" || nativeReturn?.status === "ERROR" || exitCode !== void 0 && Number(exitCode) !== 0;
+          const failed = missingSettledReturn || call.status === "ERROR" || nativeReturn?.status === "ERROR" || exitCode !== void 0 && Number(exitCode) !== 0;
           const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
           const index = names.get(toolName) ?? 0;
           names.set(toolName, index + 1);
@@ -96707,7 +96714,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
             arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
             toolCallId: callId,
             toolName,
-            status: failed ? "failed" : call.status === "CALLING" || call.status === "EXECUTING" ? "pending" : "finished"
+            status: failed ? "failed" : pendingLiveReturn || call.status === "CALLING" || call.status === "EXECUTING" ? "pending" : "finished"
           }, time3, false);
           if (output2 !== void 0) push2("tool/result", {
             turn: currentTurn,
@@ -96912,7 +96919,18 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
         updatedAt: time3
       });
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+    const selected = summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+    await Promise.all(selected.slice(0, 32).map(async (item) => {
+      try {
+        const path = await transcriptPath(baseDir, item.conversationId);
+        if (path) {
+          const stat11 = await fs3.stat(path);
+          if (stat11.mtimeMs > item.updatedAt) item.updatedAt = stat11.mtimeMs;
+        }
+      } catch {
+      }
+    }));
+    return selected.sort((a, b) => b.updatedAt - a.updatedAt);
   } catch (error62) {
     if (error62.code !== "ENOENT") throw error62;
     if (requestedWorkspace !== void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native workspace history index is unavailable.");
@@ -96959,6 +96977,32 @@ async function transcriptPath(baseDir, conversationId, name2 = "transcript.jsonl
   } catch (error62) {
     if (error62.code === "ENOENT") return void 0;
     throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript path could not be read.");
+  }
+}
+async function isUninitializedAntigravityTranscript(conversationId, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return false;
+  try {
+    const root2 = await fs3.realpath(baseDir).catch((err5) => {
+      if (err5.code === "ENOENT") return resolve5(baseDir);
+      throw err5;
+    });
+    const convDir = join11(root2, conversationId);
+    const convStat = await fs3.lstat(convDir).catch((err5) => {
+      if (err5.code === "ENOENT") return null;
+      throw err5;
+    });
+    if (convStat !== null) {
+      if (convStat.isSymbolicLink() || !convStat.isDirectory()) return false;
+      if (await fs3.realpath(convDir) !== convDir) return false;
+    }
+    const logPath = join11(convDir, ".system_generated", "logs", "transcript.jsonl");
+    const logStat = await fs3.lstat(logPath).catch((err5) => {
+      if (err5.code === "ENOENT") return null;
+      throw err5;
+    });
+    return logStat === null;
+  } catch {
+    return false;
   }
 }
 
@@ -97668,7 +97712,12 @@ var AcpRemoteGateway = class {
         return { events: events2, ...preset2 ? { permissionPreset: preset2 } : {} };
       }
       if (backend !== "antigravity") return { events: [] };
-      const events = await loadTranscriptEvents(conversationId, rawSessionId);
+      const events = await loadTranscriptEvents(conversationId, rawSessionId).catch(async (error62) => {
+        if (error62 instanceof RpcError && error62.code === "HISTORY_UNAVAILABLE" && this.sessionCwds.get(conversationId)?.backend === "antigravity" && await isUninitializedAntigravityTranscript(conversationId)) {
+          return [];
+        }
+        throw error62;
+      });
       this.logger.info("ACP session history fetched", {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length

@@ -54,6 +54,10 @@ export async function loadTranscriptEvents(
       const record = records[index]!
       if (!record.truncated_fields?.length) continue
       const restored = complete.get(identity(record))
+      if (!restored && index === records.length - 1 && records.length > 1 && complete.size > 0) {
+        // Live append race: compact transcript flushed its newest tail step just before transcript_full.jsonl.
+        continue
+      }
       if (!restored || restored.truncated_fields?.length
         || record.truncated_fields.some(field => !(field in restored))) {
         throw new RpcError('HISTORY_INCOMPLETE', 'The full native transcript has not completed this record.')
@@ -155,25 +159,29 @@ export async function loadTranscriptEvents(
       }
 
       if (Array.isArray(record.tool_calls)) {
-        // Native AGY logs tool returns as ordered GENERIC records following
-        // their planner batch. Never bind a mismatched batch to arbitrary calls.
+        // Native AGY appends GENERIC tool returns sequentially as each parallel
+        // tool call finishes, and an interrupted batch may settle with fewer returns.
         const returns: StepLogRecord[] = []
+        let settledBatch = false
         for (let index = recordIndex + 1; index < records.length; index++) {
           const next = records[index]!
-          if (next.type === 'PLANNER_RESPONSE' || next.type === 'USER_INPUT') break
+          if (next.type === 'PLANNER_RESPONSE' || next.type === 'USER_INPUT') {
+            settledBatch = true
+            break
+          }
           if (next.type === 'GENERIC') returns.push(next)
-        }
-        if (returns.length && returns.length !== record.tool_calls.length) {
-          throw new RpcError('HISTORY_INCOMPLETE', 'Native tool returns do not match their planner batch.')
         }
         let toolIndex = 0
         const names = new Map<string, number>()
         for (const call of record.tool_calls) {
-          const nativeReturn = returns[toolIndex++]
-          const output = call.result ?? nativeReturn?.content
+          const nativeReturn = toolIndex < returns.length ? returns[toolIndex] : undefined
+          toolIndex += 1
+          const missingSettledReturn = settledBatch && returns.length > 0 && nativeReturn === undefined && call.result === undefined
+          const pendingLiveReturn = !settledBatch && returns.length > 0 && nativeReturn === undefined && call.result === undefined
+          const output = call.result ?? nativeReturn?.content ?? (missingSettledReturn ? 'Tool execution was interrupted before returning output.' : undefined)
           const header = typeof output === 'string' ? output.replace(/^(?:(?:Created|Completed) At: [^\n]*\n)+/, '') : ''
           const exitCode = /^Command exited with code (-?\d+)\./.exec(header)?.[1]
-          const failed = call.status === 'ERROR' || nativeReturn?.status === 'ERROR' || (exitCode !== undefined && Number(exitCode) !== 0)
+          const failed = missingSettledReturn || call.status === 'ERROR' || nativeReturn?.status === 'ERROR' || (exitCode !== undefined && Number(exitCode) !== 0)
           const toolName = (typeof call.name === 'string' && call.name.length > 0) ? call.name : 'tool'
           const index = names.get(toolName) ?? 0
           names.set(toolName, index + 1)
@@ -186,7 +194,7 @@ export async function loadTranscriptEvents(
             arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}',
             toolCallId: callId,
             toolName,
-            status: failed ? 'failed' : call.status === 'CALLING' || call.status === 'EXECUTING' ? 'pending' : 'finished',
+            status: failed ? 'failed' : (pendingLiveReturn || call.status === 'CALLING' || call.status === 'EXECUTING') ? 'pending' : 'finished',
           }, time, false)
           if (output !== undefined) push('tool/result', {
             turn: currentTurn, step: currentStep, message: {
@@ -420,7 +428,19 @@ export async function discoverAntigravitySessions(
         updatedAt: time,
       })
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+    const selected = summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+    await Promise.all(selected.slice(0, 32).map(async item => {
+      try {
+        const path = await transcriptPath(baseDir, item.conversationId)
+        if (path) {
+          const stat = await fs.stat(path)
+          if (stat.mtimeMs > item.updatedAt) item.updatedAt = stat.mtimeMs
+        }
+      } catch {
+        // ignore transient stat failure
+      }
+    }))
+    return selected.sort((a, b) => b.updatedAt - a.updatedAt)
   } catch (error) {
     // Only an absent database permits an unscoped filesystem fallback. A
     // failed query cannot replace an established catalog with an empty list.
@@ -471,5 +491,36 @@ async function transcriptPath(baseDir: string, conversationId: string, name: 'tr
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw new RpcError('HISTORY_UNAVAILABLE', 'The native transcript path could not be read.')
+  }
+}
+
+/** True only when a valid non-symlink conversation directory has not written transcript.jsonl yet. */
+export async function isUninitializedAntigravityTranscript(
+  conversationId: string,
+  baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
+): Promise<boolean> {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return false
+  try {
+    const root = await fs.realpath(baseDir).catch(err => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return resolve(baseDir)
+      throw err
+    })
+    const convDir = join(root, conversationId)
+    const convStat = await fs.lstat(convDir).catch(err => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw err
+    })
+    if (convStat !== null) {
+      if (convStat.isSymbolicLink() || !convStat.isDirectory()) return false
+      if (await fs.realpath(convDir) !== convDir) return false
+    }
+    const logPath = join(convDir, '.system_generated', 'logs', 'transcript.jsonl')
+    const logStat = await fs.lstat(logPath).catch(err => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw err
+    })
+    return logStat === null
+  } catch {
+    return false
   }
 }

@@ -170,8 +170,19 @@ export class DirectAcpAdapter implements SourceAdapter {
         const combined = AbortSignal.any([lifetime, polling.signal]);
         let failure: unknown;
         const work = (async () => {
-            try { while (!combined.aborted) { await delay(750, undefined, { signal: combined }); await this.refresh(request.sessionId, combined); } }
-            catch (error) { if (!combined.aborted) { failure = error; polling.abort(error); } }
+            let transientFailures = 0;
+            try {
+                while (!combined.aborted) {
+                    await delay(750, undefined, { signal: combined });
+                    try {
+                        await this.refresh(request.sessionId, combined);
+                        transientFailures = 0;
+                    } catch (error) {
+                        if (combined.aborted) break;
+                        if (++transientFailures >= 6) throw error;
+                    }
+                }
+            } catch (error) { if (!combined.aborted) { failure = error; polling.abort(error); } }
         })();
         try { yield* index.changes(request, combined); }
         catch (error) { throw failure ?? error; }
