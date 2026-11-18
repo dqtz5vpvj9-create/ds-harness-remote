@@ -95,6 +95,12 @@ export class DirectCodexAdapter implements SourceAdapter {
     private readonly stops: Array<() => void>;
     private catalogRead: Promise<SourceSession[]> | undefined;
     private catalogAt = 0;
+    private fullCatalogAt = 0;
+    private catalogWatermarkSec = 0;
+    private forceFullCatalog = true;
+    private catalogInvalidation = 0;
+    private loadedCheckedAt = 0;
+    private loadedGeneration = -1;
     private readonly now: () => number;
     private readonly random: () => number;
     private retryReadsAt = 0;
@@ -130,14 +136,13 @@ export class DirectCodexAdapter implements SourceAdapter {
                     const owner = await this.owner(sourceSessionId({ machineId: this.machineId, sourceId: this.id, engine: this.engine, nativeId: params.threadId }));
                     await this.ensureExecutionOwner(owner, true);
                 }
-                // Execution methods never silently resume or replace an existing owner.
+                // Explicit continuation/settings may acquire the exact native owner;
+                // steering and cancellation still require an already-loaded thread.
                 if (params && typeof params.threadId === 'string' && (method.startsWith('turn/') || method === 'thread/settings/update' || method === 'review/start' || method === 'thread/compact/start')) {
-                    const loaded = await this.loadedThreads(this.lifetime.signal);
-                    if (!loaded.has(params.threadId)) throw new SourceError('UNSUPPORTED', 'This thread is not loaded by this native execution owner.');
-                    if (method === 'thread/settings/update') {
+                    if (['thread/settings/update', 'turn/start', 'review/start', 'thread/compact/start', 'turn/steer', 'turn/interrupt'].includes(method)) {
                         const owner = await this.owner(sourceSessionId({ machineId: this.machineId, sourceId: this.id, engine: this.engine, nativeId: params.threadId }));
-                        await this.ensureExecutionOwner(owner, true, true);
-                    }
+                        await this.ensureExecutionOwner(owner, method !== 'turn/steer' && method !== 'turn/interrupt', false);
+                    } else if (!(await this.loadedThreads(this.lifetime.signal)).has(params.threadId)) throw new SourceError('UNSUPPORTED', 'This thread is not loaded by this native execution owner.');
                 }
                 if (params && ['thread/queue/add', 'thread/queue/update', 'turn/steer', 'turn/start'].includes(method)) return this.uploadDispatch(method, params);
             },
@@ -147,11 +152,14 @@ export class DirectCodexAdapter implements SourceAdapter {
                     const thread = nativeThreadSchema.safeParse(response.thread);
                     if (thread.success) {
                         if (method === 'thread/start' || method === 'thread/fork') this.creations.protectTarget(thread.data.id);
-                        if (method === 'thread/start' || method === 'thread/fork' || method === 'thread/resume') this.subscriptions.set(thread.data.id, this.rpc.currentGeneration);
+                        if (method === 'thread/start' || method === 'thread/fork' || method === 'thread/resume') {
+                            this.subscriptions.set(thread.data.id, this.rpc.currentGeneration); this.loaded.add(thread.data.id);
+                        }
                         this.rememberResponse({ ...response, thread: thread.data });
                     }
                 }
                 const owner = typeof params?.threadId === 'string' ? this.threads.get(params.threadId) : undefined;
+                if (method === 'thread/archive' || method === 'thread/unarchive') { this.forceFullCatalog = true; this.catalogInvalidation++; }
                 if (owner && (method === 'thread/archive' || method === 'thread/unarchive')) {
                     owner.observation.invalidateHistory();
                     owner.archived = method === 'thread/archive';
@@ -359,6 +367,8 @@ export class DirectCodexAdapter implements SourceAdapter {
         this.attentionConnection = new AbortController();
         this.readFailed();
         this.catalogAt = 0; this.loaded.clear(); this.subscriptions.clear(); this.subscriptionJoins.clear(); this.approvals.clear();
+        this.forceFullCatalog = true; this.fullCatalogAt = 0; this.catalogWatermarkSec = 0;
+        this.loadedCheckedAt = 0; this.loadedGeneration = -1; this.catalogInvalidation++;
         for (const owner of this.threads.values()) { owner.observation.invalidateHistory(); owner.pending.length = 0; owner.pendingBytes = 0; this.markOffline(owner); }
     }
     private catalogSessions(): SourceSession[] {
@@ -374,13 +384,14 @@ export class DirectCodexAdapter implements SourceAdapter {
         if (this.rpc.online && this.catalogAt > 0 && this.now() - this.catalogAt < 15_000) return this.catalogSessions();
         if (!this.catalogRead) {
             const work = this.readCatalog().then(sessions => { this.readRecovered(); return sessions; }, (error: unknown) => {
-                this.readFailed(); throw error;
+                this.forceFullCatalog = true; this.readFailed(); throw error;
             }).finally(() => { if (this.catalogRead === work) this.catalogRead = undefined; });
             this.catalogRead = work;
         }
         return waitFor(this.catalogRead, signal);
     }
     private async loadedThreads(signal: AbortSignal): Promise<Set<string>> {
+        const generation = this.rpc.currentGeneration;
         const loaded = new Set<string>(), seenLoaded = new Set<string>();
         let cursor: string | null = null;
         do {
@@ -391,34 +402,53 @@ export class DirectCodexAdapter implements SourceAdapter {
             if (cursor && seenLoaded.has(cursor)) throw new SourceError('TARGET_UNAVAILABLE', 'The native loaded-thread cursor did not progress.');
             if (cursor) seenLoaded.add(cursor);
         } while (cursor);
+        if (generation !== this.rpc.currentGeneration) throw new SourceError('TARGET_UNAVAILABLE', 'The native loaded-thread connection was replaced.');
+        this.loaded.clear(); for (const id of loaded) this.loaded.add(id);
+        for (const id of this.subscriptions.keys()) if (!loaded.has(id)) this.subscriptions.delete(id);
+        this.loadedGeneration = generation; this.loadedCheckedAt = this.now();
         return loaded;
     }
     private async readCatalog(): Promise<SourceSession[]> {
         const signal = this.lifetime.signal;
         await this.connectForRead();
         const generation = this.rpc.currentGeneration;
+        const invalidation = this.catalogInvalidation;
+        const incremental = !this.forceFullCatalog && this.fullCatalogAt > 0 && this.now() - this.fullCatalogAt < 300_000 && this.catalogWatermarkSec > 0;
+        const watermark = this.catalogWatermarkSec;
+        let newest = incremental ? watermark : 0;
         const observations = new Map([...this.threads].map(([id, owner]) => [id, owner.observation.capture()]));
+        const previouslyLoaded = new Set(this.loaded);
         const loaded = await this.loadedThreads(signal);
         let cursor: string | null = null;
-        this.loaded.clear(); for (const id of loaded) this.loaded.add(id);
         const accepted = new Set<string>(), cursors = new Set<string>();
         do {
             const page = threadListSchema.parse(await this.rpc.request('thread/list', { limit: 100, sortKey: 'updated_at', sortDirection: 'desc', modelProviders: [], useStateDbOnly: true, ...(cursor ? { cursor } : {}) }, { signal }));
-            for (const thread of page.data) { accepted.add(thread.id); if (generation === this.rpc.currentGeneration && observations.get(thread.id)?.() !== false) this.remember(thread).archived = false; }
+            for (const thread of page.data) {
+                newest = Math.max(newest, thread.updatedAt);
+                accepted.add(thread.id); if (generation === this.rpc.currentGeneration && observations.get(thread.id)?.() !== false) this.remember(thread).archived = false;
+            }
             if (accepted.size > MAX_CATALOG) throw new SourceError('CAPACITY_EXCEEDED', 'This source catalog exceeds the 10,000-session limit.');
             cursor = page.nextCursor;
-            if (cursor && cursors.has(cursor)) throw new SourceError('TARGET_UNAVAILABLE', 'The native thread-list cursor did not progress.');
+            if (cursor && (cursors.has(cursor) || cursors.size >= MAX_NATIVE_PAGES)) throw new SourceError('TARGET_UNAVAILABLE', 'The native thread-list cursor did not progress within its source budget.');
             if (cursor) cursors.add(cursor);
+            if (incremental && page.data.length && page.data.at(-1)!.updatedAt < watermark - 60) break;
         } while (cursor);
         if (generation !== this.rpc.currentGeneration) throw new SourceError('TARGET_UNAVAILABLE', 'The native catalog connection was replaced.');
         // Ephemeral loaded native threads may be absent from the persisted catalog.
         for (const id of loaded) if (!accepted.has(id)) {
-            const response = threadResponseSchema.parse(await this.rpc.request('thread/read', { threadId: id, includeTurns: false }, { signal }));
-            this.remember(response.thread); accepted.add(id);
+            const known = incremental ? this.threads.get(id) : undefined;
+            if (known) this.metadata(known, this.descriptor(known.native));
+            else {
+                const response = threadResponseSchema.parse(await this.rpc.request('thread/read', { threadId: id, includeTurns: false }, { signal }));
+                if (response.thread.id !== id) throw new SourceError('INVALID_REQUEST', 'The native source returned another loaded thread.');
+                if (generation === this.rpc.currentGeneration && observations.get(id)?.() !== false) this.remember(response.thread);
+            }
+            accepted.add(id);
         }
         // An omission can be a transient catalog gap. Hide only IDs the native
         // archived directory explicitly confirms, never every absent owner.
-        const omitted = new Set([...this.threads].filter(([id, owner]) => !accepted.has(id) && !owner.archived && !owner.deleted && !owner.catalogRetired).map(([id]) => id));
+        const needsOmissionCheck = (id: string): boolean => !incremental || previouslyLoaded.has(id) && !loaded.has(id);
+        const omitted = new Set([...this.threads].filter(([id, owner]) => needsOmissionCheck(id) && !accepted.has(id) && !owner.archived && !owner.deleted && !owner.catalogRetired).map(([id]) => id));
         const archivedCursors = new Set<string>();
         cursor = null;
         while (omitted.size) {
@@ -447,9 +477,8 @@ export class DirectCodexAdapter implements SourceAdapter {
                 // confirm this gap; absence never becomes an archive decision.
             }
         }
-        // Only exact not-loaded outcomes after complete active/archive/loaded
-        // directories may ask the source-local persistence owner for proof.
-        if (unloaded.length) {
+        // Only a complete directory scan may retire an absent persisted row.
+        if (!incremental && unloaded.length) {
             const protection = await this.creations.protection();
             const candidates = unloaded.filter(id => {
                 const owner = this.threads.get(id)!;
@@ -472,8 +501,13 @@ export class DirectCodexAdapter implements SourceAdapter {
             }
         }
         if (generation !== this.rpc.currentGeneration) throw new SourceError('TARGET_UNAVAILABLE', 'The native catalog connection was replaced.');
-        for (const [id, owner] of this.threads) if (!accepted.has(id) && observations.get(id)?.() !== false) this.markOffline(owner);
-        this.catalogAt = this.now();
+        for (const [id, owner] of this.threads) if (needsOmissionCheck(id) && !accepted.has(id) && observations.get(id)?.() !== false) this.markOffline(owner);
+        this.catalogWatermarkSec = newest;
+        if (!incremental) {
+            this.fullCatalogAt = this.now();
+            if (invalidation === this.catalogInvalidation) this.forceFullCatalog = false;
+        }
+        this.catalogAt = invalidation === this.catalogInvalidation ? this.now() : 0;
         return this.catalogSessions();
     }
     private async owner(sessionId: string, signal?: AbortSignal): Promise<ThreadOwner> {
@@ -910,8 +944,10 @@ export class DirectCodexAdapter implements SourceAdapter {
         return entry;
     }
     private notification(frame: NativeNotification): void {
+        if (frame.method === 'thread/archived' || frame.method === 'thread/unarchived') { this.forceFullCatalog = true; this.catalogAt = 0; this.catalogInvalidation++; }
         const threadId = typeof frame.params.threadId === 'string' ? frame.params.threadId : isRecord(frame.params.thread) ? frame.params.thread.id : undefined;
         if (typeof threadId !== 'string') return;
+        if (frame.method === 'thread/closed') { this.loaded.delete(threadId); this.subscriptions.delete(threadId); }
         if (frame.method === 'turn/completed' && isRecord(frame.params.turn)
             && typeof frame.params.turn.id === 'string'
             && (frame.params.turn.status === 'completed' || frame.params.turn.status === 'failed')) {
@@ -923,8 +959,9 @@ export class DirectCodexAdapter implements SourceAdapter {
         }
         if (frame.method === 'thread/started') {
             this.catalogAt = 0;
+            this.loaded.add(threadId);
             const parsed = nativeThreadSchema.safeParse(frame.params.thread);
-            if (parsed.success) { this.loaded.add(threadId); this.remember(parsed.data); }
+            if (parsed.success) this.remember(parsed.data);
         }
         const owner = this.threads.get(threadId);
         if (!owner) { this.catalogAt = 0; return; }
@@ -1278,7 +1315,9 @@ export class DirectCodexAdapter implements SourceAdapter {
         try {
             await this.rpc.connect(this.lifetime.signal);
             generation = this.rpc.currentGeneration;
-            loaded = await this.loadedThreads(this.lifetime.signal);
+            loaded = this.loadedGeneration === generation && this.loaded.has(owner.native.id)
+                && this.subscriptions.get(owner.native.id) === generation && this.now() - this.loadedCheckedAt < 10_000
+                ? this.loaded : await this.loadedThreads(this.lifetime.signal);
             if (generation !== this.rpc.currentGeneration) throw new Error('The native connection changed while checking its loaded threads.');
         } catch (error) { throw this.preflightFailure(error); }
         if (loaded.has(owner.native.id)) this.loaded.add(owner.native.id);
@@ -1289,9 +1328,8 @@ export class DirectCodexAdapter implements SourceAdapter {
         if (!allowResume) throw new SourceError('UNSUPPORTED', 'This thread is not loaded by the connected native app-server. Steering and cancellation cannot resume it.');
         if (this.config.ownership !== 'exclusive' && this.config.writerLock !== 'native') throw new SourceError('UNSUPPORTED', 'Continuing shared native history requires verified native thread writer locking.');
         // Loaded belongs to the daemon; subscription belongs to this connection.
-        // Explicit settings may join an already-loaded thread; only new queue
-        // admission may cold-resume the exact
-        // native thread. Receipt reads, history, reconnect and controls do not.
+        // Explicit settings/continuation and queue admission may cold-resume
+        // this exact thread under verified ownership. Reads and idle controls do not.
         const prior = this.subscriptionJoins.get(owner.native.id);
         if (prior?.generation === generation) return prior.work;
         const work = (async () => {

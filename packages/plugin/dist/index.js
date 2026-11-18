@@ -70969,6 +70969,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   lastOpenedSessionId;
   openedWorkspaceSessions = /* @__PURE__ */ new Map();
   selectedModels = /* @__PURE__ */ new Map();
+  modelDefaults = /* @__PURE__ */ new Map();
   selectedPermissions = /* @__PURE__ */ new Map();
   commandSeq = 0;
   lastProjectionSeq = 0;
@@ -71026,7 +71027,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       title: session2.title ?? this.backendLabel(),
       updatedAt: session2.updatedAt,
       running: session2.running,
-      selection: selected?.model === "host-settings" ? void 0 : selected
+      selection: selected?.model === "host-settings" ? void 0 : selected,
+      ...selected?.model === "host-settings" ? this.modelDefaults.get(session2.sessionId) : void 0
     };
   }
   async sourceSnapshot(nativeId) {
@@ -71852,6 +71854,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     const models = await this.client.sessionModels(nativeAcpId(resolvedId, this.backend), this.backend);
     this.selectedModels.set(resolvedId, models.current);
+    const providerGroup = models.groups.find((group) => group.id.toLowerCase() === models.current.provider.toLowerCase());
+    const firstModel = models.current.model === "host-settings" ? providerGroup?.models[0] : void 0;
+    if (firstModel) {
+      const defaultEffort = models.current.reasoningEffort ?? firstModel.reasoning?.defaultEffort;
+      const defaults = { defaultModel: firstModel.id, ...defaultEffort === void 0 ? {} : { defaultEffort } };
+      this.modelDefaults.set(resolvedId, defaults);
+      return { ...models, ...defaults };
+    }
+    this.modelDefaults.delete(resolvedId);
     return models;
   }
   async selectModel(request) {
@@ -71882,6 +71893,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (!this.client.selectModel) return failure2("model-unavailable", "The Host does not support ACP model selection.");
     const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
     this.selectedModels.set(sessionId, confirmed);
+    this.modelDefaults.delete(sessionId);
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed);
     const session2 = this.sessions.get(sessionId);
     if (session2 !== void 0) this.syncSessionCache(session2);

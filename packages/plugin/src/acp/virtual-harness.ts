@@ -66,6 +66,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private lastOpenedSessionId?: string
   private readonly openedWorkspaceSessions = new Map<string, string>()
   private readonly selectedModels = new Map<string, AcpModelSelection>()
+  private readonly modelDefaults = new Map<string, { defaultModel: string; defaultEffort?: string }>()
   private readonly selectedPermissions = new Map<string, AcpPermissionPreset>()
   private commandSeq = 0
   private lastProjectionSeq = 0
@@ -193,7 +194,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private sourceMetadata(session: AcpSessionState) {
     const selected = this.selectedModels.get(session.sessionId)
     return { nativeId: session.acpSessionId, cwd: session.cwd, title: session.title ?? this.backendLabel(),
-      updatedAt: session.updatedAt, running: session.running, selection: selected?.model === 'host-settings' ? undefined : selected }
+      updatedAt: session.updatedAt, running: session.running, selection: selected?.model === 'host-settings' ? undefined : selected,
+      ...(selected?.model === 'host-settings' ? this.modelDefaults.get(session.sessionId) : undefined) }
   }
 
   async sourceSnapshot(nativeId: string) {
@@ -1057,7 +1059,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return { commandId, result: { kind: 'success', text: `preset ${requested}` } }
   }
 
-  private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
+  private async hostSessionModels(sessionId: string): Promise<AcpSessionModels & { defaultModel?: string; defaultEffort?: string }> {
     const resolvedId = this.resolveSessionId(sessionId)
     if (!this.client.sessionModels) {
       const catalog = modelCatalog(this.backend)
@@ -1070,6 +1072,17 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     const models = await this.client.sessionModels(nativeAcpId(resolvedId, this.backend), this.backend)
     this.selectedModels.set(resolvedId, models.current)
+    // Host settings are intentionally unknown. Surface a catalog default without
+    // projecting it as a confirmed selection or sending an upstream mutation.
+    const providerGroup = models.groups.find(group => group.id.toLowerCase() === models.current.provider.toLowerCase())
+    const firstModel = models.current.model === 'host-settings' ? providerGroup?.models[0] : undefined
+    if (firstModel) {
+      const defaultEffort = models.current.reasoningEffort ?? firstModel.reasoning?.defaultEffort
+      const defaults = { defaultModel: firstModel.id, ...(defaultEffort === undefined ? {} : { defaultEffort }) }
+      this.modelDefaults.set(resolvedId, defaults)
+      return { ...models, ...defaults }
+    }
+    this.modelDefaults.delete(resolvedId)
     return models
   }
 
@@ -1101,6 +1114,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (!this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
     const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected)
     this.selectedModels.set(sessionId, confirmed)
+    this.modelDefaults.delete(sessionId)
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed)
     const session = this.sessions.get(sessionId)
     if (session !== undefined) this.syncSessionCache(session)

@@ -182,8 +182,14 @@ test('explicit settings join only the exact loaded generation; receipt reads and
     assert.deepEqual(f.writes().slice(before).map(call => call.method), ['thread/resume', 'thread/settings/update']);
 });
 
-test('settings never cold-resume an unloaded thread or join an unverified shared writer', async t => {
-    for (const options of [{ loaded: false, writerLock: true }, { loaded: true, writerLock: false }]) {
+test('settings cold-resume only when writer locking is verified and reject unverified shared writers', async t => {
+    const locked = await fixture(t, { loaded: false, writerLock: true });
+    const accepted = await locked.adapter.nativeAccess.call({ sourceId: identity.sourceId, operationId: 'settings-cold-locked', method: 'thread/settings/update',
+        params: { threadId: identity.nativeId, effort: 'high' } });
+    assert.equal(accepted.status, 'accepted');
+    assert.deepEqual(locked.writes().map(call => call.method), ['thread/resume', 'thread/settings/update']);
+
+    for (const options of [{ loaded: true, writerLock: false }, { loaded: false, writerLock: false }]) {
         const f = await fixture(t, options);
         const result = await f.adapter.nativeAccess.call({ sourceId: identity.sourceId, operationId: 'settings-denied', method: 'thread/settings/update',
             params: { threadId: identity.nativeId, effort: 'high' } });
