@@ -1,4 +1,6 @@
 /** Durable source contract around Remote's existing ACP execution and DSH projection. */
+import { watch, type FSWatcher } from 'node:fs';
+import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, isAbsolute, extname } from 'node:path';
 import { realpath, stat, readFile, mkdir } from 'node:fs/promises';
@@ -6,6 +8,7 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write';
 import type { FileUploadValue } from '@deepseek-ai/dsh-client-file-upload/types';
 import { storedCodexUpload, registerStoredCodexUpload } from './codex-uploads.ts';
 import { setTimeout as delay } from 'node:timers/promises';
+import { sourceResumeContext, type SourceResumeContext } from '../workspace/source-navigation-api.ts';
 import { SourceEventIndex, type EventInput } from './event-index.ts';
 import { OperationLedger, CreationLedger, ReceiptLedger } from './operation-ledger.ts';
 import { SourceError, waitFor } from './errors.ts';
@@ -16,6 +19,7 @@ import type { CodexCall, CodexCallResult } from './codex-access.ts';
 
 export interface AcpSourceSnapshot {
     nativeId: string; cwd: string; title: string; updatedAt: number; running: boolean;
+    parentNativeId?: string | undefined; agentRole?: string | undefined;
     selection?: { provider: string; model: string; reasoningEffort?: string } | undefined;
     entries?: Array<{ type: 'event'; event: EventInput & { seq: number } }>;
 }
@@ -38,12 +42,45 @@ function imageMimeType(bytes: Buffer, name: string): string | undefined {
     return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<string, string>)[extname(name).toLowerCase()];
 }
 
+type SnapshotEntries = NonNullable<AcpSourceSnapshot['entries']>;
+const serializedEvents = new WeakMap<object, string>();
+function immutableJson(value: unknown): boolean {
+    return !value || typeof value !== 'object' || (Object.isFrozen(value) && Object.values(value).every(immutableJson));
+}
+function eventJson(event: object): string {
+    const cached = serializedEvents.get(event);
+    if (cached !== undefined) return cached;
+    const json = JSON.stringify(event);
+    // Older source ports can reuse mutable input objects. Only cache a value
+    // whose nested data cannot change behind the accepted fingerprint.
+    if (immutableJson(event)) serializedEvents.set(event, json);
+    return json;
+}
+
+async function watchLocalTranscript(nativeId: string, signal: AbortSignal, wake: () => void): Promise<FSWatcher | undefined> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(nativeId)) return;
+    try {
+        const brain = await realpath(join(homedir(), '.gemini/antigravity-cli/brain'));
+        const logs = join(brain, nativeId, '.system_generated/logs');
+        if (await realpath(logs) !== logs || !(await stat(logs)).isDirectory() || signal.aborted) return;
+        const watcher = watch(logs, { signal, persistent: false }, (_event, filename) => {
+            if (!filename || filename === 'transcript.jsonl' || filename === 'transcript_full.jsonl') wake();
+        });
+        watcher.on('error', () => watcher.close());
+        return watcher;
+    } catch { return; } // Missing local logs and unsupported filesystems use polling.
+}
+
 export class DirectAcpAdapter implements SourceAdapter {
     readonly id: string;
     readonly machineId: string;
     readonly engine = 'antigravity';
     readonly nativeAccess: NonNullable<SourceAdapter['nativeAccess']>;
     private readonly indexes = new Map<string, SourceEventIndex>();
+    // SQLite supplies the restart baseline. Keep accepted fingerprints in memory
+    // so a refresh never decodes that baseline twice for an active session.
+    private readonly snapshots = new Map<string, { json: string[]; immutable: Array<object | undefined> }>();
+    private readonly strippedImages = new WeakMap<object, SnapshotEntries[number]['event']>();
     private readonly reads = new Map<string, Promise<SourceEventIndex>>();
     private readonly lifetime = new AbortController();
     private readonly operations: OperationLedger;
@@ -79,12 +116,23 @@ export class DirectAcpAdapter implements SourceAdapter {
         return { ...identity, id: sourceSessionId(identity), cwd: value.cwd, title: value.title, updatedAt: value.updatedAt,
             status: value.running ? 'running' : 'idle', activeTurnId: value.running ? value.nativeId : null,
             capabilities: { send: true, steer: false, cancel: true, approve: false, files: this.files, images: true },
-            pendingRequests: [], agent: value.selection };
+            pendingRequests: [], agent: value.parentNativeId || value.agentRole ? {
+                ...(value.selection ?? { provider: 'antigravity', model: '' }),
+                ...(value.parentNativeId && { parentNativeId: value.parentNativeId }),
+                ...(value.agentRole && { agentRole: value.agentRole }),
+            } : value.selection };
     }
     async list(signal?: AbortSignal): Promise<SourceSession[]> {
         return (await waitFor(this.port().list(), signal)).map(value => this.metadata(value));
     }
     async resolve(sessionId: string, signal?: AbortSignal): Promise<SourceSession> { return (await this.refresh(sessionId, signal)).session; }
+    async resumeContext(sessionId: string, signal?: AbortSignal): Promise<SourceResumeContext> {
+        const session = await this.resolve(sessionId, signal);
+        const platformOs = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : process.platform;
+        const platformFamily = process.platform === 'win32' ? 'windows' : 'unix';
+        return sourceResumeContext.parse({ sessionId, machineId: session.machineId, sourceId: session.sourceId,
+            engine: session.engine, nativeId: session.nativeId, cwd: session.cwd, platformOs, platformFamily });
+    }
     private async refresh(sessionId: string, signal?: AbortSignal): Promise<SourceEventIndex> {
         const nativeId = this.identity(sessionId);
         let work = this.reads.get(nativeId);
@@ -104,6 +152,8 @@ export class DirectAcpAdapter implements SourceAdapter {
         // Attachment bytes remain in the source attachment reader, never in a
         // history row whose page budget could otherwise hide the whole turn.
         const entries = snapshot.entries.map(entry => {
+            const stripped = this.strippedImages.get(entry.event);
+            if (stripped) return { type: entry.type, event: stripped };
             const data = entry.event.data as Record<string, unknown>;
             const body = entry.event.type === 'assistant/message' ? data.message as Record<string, unknown> : data;
             if (!Array.isArray(body?.content) || !body.content.some(part => part && typeof part === 'object' && part.type === 'image' && part.attachment && 'data' in part)) return entry;
@@ -113,7 +163,11 @@ export class DirectAcpAdapter implements SourceAdapter {
                 if (!part || typeof part !== 'object' || part.type !== 'image' || !part.attachment) return part;
                 const { data: _bytes, ...reference } = part; return reference;
             });
-            return { type: 'event', event };
+            if (immutableJson(entry.event)) {
+                this.strippedImages.set(entry.event, event);
+                serializedEvents.set(event, JSON.stringify(event));
+            }
+            return { type: entry.type, event };
         });
         let index = this.indexes.get(nativeId);
         if (!index) {
@@ -121,25 +175,39 @@ export class DirectAcpAdapter implements SourceAdapter {
             this.indexes.set(nativeId, index);
         }
         const store = index;
-        const old = store.cached<typeof entries>('acp/snapshot') ?? [];
+        const accepted = this.snapshots.get(nativeId);
+        const old = accepted?.json ?? store.cached<SnapshotEntries>('acp/snapshot')?.map(row => eventJson(row.event)) ?? [];
         const graphCurrent = store.cached<number>('acp/dependency-version') === 1;
-        let resetAt = graphCurrent ? Math.min(old.length, entries.length) : 0;
-        for (let i = 0; i < resetAt; i++) {
-            if (old[i]!.type !== entries[i]!.type || JSON.stringify(old[i]!.event) !== JSON.stringify(entries[i]!.event)) { resetAt = i; break; }
+        let resetAt = 0;
+        if (graphCurrent) {
+            const end = Math.min(old.length, entries.length);
+            while (resetAt < end) {
+                const row = entries[resetAt]!;
+                if (row.type !== 'event' || (row.event !== accepted?.immutable[resetAt] && old[resetAt] !== eventJson(row.event))) break;
+                resetAt++;
+            }
         }
         const previous = store.session;
         const metadataChanged = session.title !== previous.title || session.cwd !== previous.cwd
             || session.updatedAt !== previous.updatedAt || session.status !== previous.status
             || session.activeTurnId !== previous.activeTurnId || JSON.stringify(session.agent) !== JSON.stringify(previous.agent);
-        if (graphCurrent && resetAt === old.length && entries.length === old.length && !metadataChanged) return store;
+        const unchanged = graphCurrent && resetAt === old.length && entries.length === old.length && !metadataChanged;
         // The existing projection owns DSH event conversion. Persist its accepted
         // snapshot atomically, and explicitly reset cursors on a native rewrite.
-        store.edit(session, () => {
+        let fingerprints = old;
+        if (resetAt < old.length || resetAt < entries.length) {
+            fingerprints = old.slice(0, resetAt);
+            for (let i = resetAt; i < entries.length; i++) {
+                const row = entries[i]!;
+                if (row.type !== 'event' || !Number.isSafeInteger(row.event.seq)) throw new SourceError('HISTORY_UNAVAILABLE', 'Invalid native history entry.');
+                fingerprints.push(eventJson(row.event));
+            }
+        }
+        if (!unchanged) store.edit(session, () => {
             if (resetAt < old.length) store.removeFrom(resetAt + 1);
             const calls = new Map<string, string>();
             let turnStart: string | undefined, stepStart: string | undefined, stepMessage: string | undefined;
             entries.forEach((entry, offset) => {
-                if (entry.type !== 'event' || !Number.isSafeInteger(entry.event.seq)) throw new SourceError('HISTORY_UNAVAILABLE', 'Invalid native history entry.');
                 const key = `acp:${offset}`, { seq: _seq, ...event } = entry.event;
                 const data = event.data as Record<string, unknown>;
                 if (event.type === 'turn/start') { turnStart = undefined; stepStart = undefined; stepMessage = undefined; }
@@ -160,33 +228,57 @@ export class DirectAcpAdapter implements SourceAdapter {
             store.cache('acp/snapshot', entries);
             store.cache('acp/dependency-version', 1);
         });
+        this.snapshots.delete(nativeId);
+        this.snapshots.set(nativeId, accepted && fingerprints === old ? accepted : {
+            json: fingerprints, immutable: entries.map(row => serializedEvents.has(row.event) ? row.event : undefined),
+        });
+        if (this.snapshots.size > 96) this.snapshots.delete(this.snapshots.keys().next().value!);
         return store;
     }
     async read(request: SourceReadRequest, signal?: AbortSignal) { return (await this.refresh(request.sessionId, signal)).read(request); }
     async *changes(request: SourceChangesRequest, signal?: AbortSignal) {
         const lifetime = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
-        const index = await this.refresh(request.sessionId, lifetime);
+        const nativeId = this.identity(request.sessionId);
         const polling = new AbortController();
         const combined = AbortSignal.any([lifetime, polling.signal]);
+        let wake = new AbortController();
+        let debounce: ReturnType<typeof setTimeout> | undefined;
+        const watcher = await watchLocalTranscript(nativeId, combined, () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => wake.abort(), 80);
+        });
+        let work: Promise<void> | undefined;
         let failure: unknown;
-        const work = (async () => {
-            let transientFailures = 0;
-            try {
-                while (!combined.aborted) {
-                    await delay(750, undefined, { signal: combined });
-                    try {
-                        await this.refresh(request.sessionId, combined);
-                        transientFailures = 0;
-                    } catch (error) {
+        try {
+            const index = await this.refresh(request.sessionId, combined);
+            work = (async () => {
+                let transientFailures = 0;
+                try {
+                    while (!combined.aborted) {
+                        // A notification during refresh stays latched for the next wait.
+                        const tick = AbortSignal.any([combined, wake.signal]);
+                        try { await delay(750, undefined, { signal: tick }); }
+                        catch (error) { if (!tick.aborted) throw error; }
                         if (combined.aborted) break;
-                        if (++transientFailures >= 6) throw error;
+                        wake = new AbortController();
+                        try {
+                            await this.refresh(request.sessionId, combined);
+                            transientFailures = 0;
+                        } catch (error) {
+                            if (combined.aborted) break;
+                            if (++transientFailures >= 6) throw error;
+                        }
                     }
-                }
-            } catch (error) { if (!combined.aborted) { failure = error; polling.abort(error); } }
-        })();
-        try { yield* index.changes(request, combined); }
-        catch (error) { throw failure ?? error; }
-        finally { polling.abort(); await work; }
+                } catch (error) { if (!combined.aborted) { failure = error; polling.abort(error); } }
+            })();
+            yield* index.changes(request, combined);
+        } catch (error) { throw failure ?? error; }
+        finally {
+            polling.abort();
+            watcher?.close();
+            clearTimeout(debounce);
+            await work;
+        }
     }
     async operate(request: SourceOperation): Promise<SourceReceipt> {
         const nativeId = this.identity(request.sessionId);

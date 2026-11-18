@@ -8,6 +8,12 @@ export interface ToolCallPayload {
   status?: 'CALLING' | 'EXECUTING' | 'SUCCESS' | 'ERROR'
 }
 
+export interface SubagentLink {
+  childId: string
+  role?: string
+  typeName?: string
+}
+
 export interface StepLogRecord {
   step_index: number
   source?: 'USER_EXPLICIT' | 'MODEL' | 'SYSTEM'

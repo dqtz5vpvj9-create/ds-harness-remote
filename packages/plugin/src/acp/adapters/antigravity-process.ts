@@ -4,6 +4,9 @@ import { parseAcpImage } from '../image-content.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { SafeLogger } from '../../logging.js'
 import type {
   CursorAcpInbound,
@@ -17,6 +20,7 @@ import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
+const SESSION_WORKER_IDLE_MS = 90_000
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
 
 export type SpawnAntigravityAcp = (binary: string, args: string[], cwd?: string) => ChildProcessWithoutNullStreams
@@ -26,6 +30,16 @@ export class AntigravityAcpError extends Error {
     super(message, options)
     this.name = 'AntigravityAcpError'
   }
+}
+
+export function antigravitySpawnEnv(baseEnv: NodeJS.ProcessEnv = process.env, homeDir: string = homedir()): NodeJS.ProcessEnv {
+  if (process.platform === 'linux' && !baseEnv.SSH_CONNECTION && !baseEnv.SSH_CLIENT && !baseEnv.SSH_TTY) {
+    if ((!baseEnv.DISPLAY && !baseEnv.WAYLAND_DISPLAY)
+      || existsSync(join(baseEnv.HOME || homeDir, '.gemini/antigravity-cli/antigravity-oauth-token'))) {
+      return { ...baseEnv, SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 22' }
+    }
+  }
+  return baseEnv
 }
 
 export function resolveAntigravityBinary(preferred?: string): string {
@@ -48,6 +62,7 @@ export interface AntigravityAcpClientOptions {
   args?: string[]
   readModels?: () => Promise<AgyCatalog>
   brainDir?: string
+  idleTimeoutMs?: number
 }
 
 /**
@@ -69,6 +84,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private readonly sessionWorker: boolean
   private initialConversationClaimed = false
   private readonly sessions = new Map<string, AntigravityAcpClient>()
+  private syncedTranscriptMtimeMs = 0
+  private idleTimer?: ReturnType<typeof setTimeout>
+  private readonly idleTimeoutMs: number
+  private onIdleClose?: () => void
+  private readonly sessionCwds = new Map<string, string>()
   private spare?: Promise<AntigravityAcpClient>
   private spareCwd?: string
   private readonly args: string[]
@@ -78,6 +98,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private readonly dispatchedThinkingSteps = new Set<number>()
   private readonly selections = new Map<string, AgySelection>()
   private readonly selecting = new Set<string>()
+  private stagingPrompt = false
   private currentPromptPending?: {
     sessionId: string
     resolve: (result: unknown) => void
@@ -92,7 +113,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      env: process.env,
+      env: antigravitySpawnEnv(process.env),
     }),
     options: AntigravityAcpClientOptions = {},
   ) {
@@ -100,6 +121,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
     this.readModels = options.sessionWorker ? loadModels : cachedAgyModels(loadModels)
     this.args = options.args ?? ['--input-format', 'stream-json', '--output-format', 'stream-json']
     this.cwd = options.cwd ?? process.cwd()
+    this.idleTimeoutMs = options.idleTimeoutMs ?? SESSION_WORKER_IDLE_MS
     this.brainDir = options.brainDir
     this.sessionWorker = options.sessionWorker === true
     this.initialConversationClaimed = options.conversationId !== undefined
@@ -116,17 +138,44 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
   isReady(): boolean { return this.ready }
 
-  private prepareSession(conversationId?: string, cwd = this.cwd, selectionArgs?: string[]): Promise<AntigravityAcpClient> {
+  private async readTranscriptMtimeMs(conversationId = this.activeConversationId): Promise<number> {
+    if (!conversationId) return 0
+    const brain = this.brainDir ?? join(homedir(), '.gemini/antigravity-cli/brain')
+    try {
+      return (await stat(join(brain, conversationId, '.system_generated/logs/transcript.jsonl'))).mtimeMs
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0
+      throw error
+    }
+  }
+
+  private resetIdleTimer(): void {
+    clearTimeout(this.idleTimer)
+    if (!this.onIdleClose || this.closed || this.stagingPrompt || this.currentPromptPending) return
+    this.idleTimer = setTimeout(() => {
+      if (!this.currentPromptPending) this.onIdleClose?.()
+    }, this.idleTimeoutMs)
+    this.idleTimer.unref?.()
+  }
+
+  private prepareSession(conversationId?: string, cwd = this.cwd, selectionArgs?: string[], onSpareIdle?: () => void): Promise<AntigravityAcpClient> {
     if (this.closed) return Promise.reject(new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.'))
     const worker = new AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
       args: selectionArgs ? [...withoutSelectionArgs(this.args), ...selectionArgs] : this.args,
       readModels: this.readModels,
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
+      idleTimeoutMs: this.idleTimeoutMs,
       cwd,
       brainDir: this.brainDir,
       ...(conversationId === undefined ? {} : { conversationId }),
     })
+    worker.onIdleClose = () => {
+      const id = worker.activeConversationId
+      if (id && this.sessions.get(id) === worker) this.sessions.delete(id)
+      onSpareIdle?.()
+      void worker.close()
+    }
     worker.onInbound(frame => { for (const handler of this.inboundHandlers) handler(frame) })
     return worker.start().then(async () => {
       if (this.closed) {
@@ -143,7 +192,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
   private warmNextSession(cwd = this.cwd): void {
     if (this.sessionWorker || this.closed || this.spare !== undefined) return
-    const spare = this.prepareSession(undefined, cwd)
+    const spare = this.prepareSession(undefined, cwd, undefined, () => {
+      if (this.spare === spare) this.spare = undefined
+    })
     this.spareCwd = cwd
     this.spare = spare
     // Observe startup failures even when nobody has requested the spare yet.
@@ -202,6 +253,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
         throw new AntigravityAcpError('SESSION_MISMATCH', 'Antigravity reused an existing conversation for session/new.')
       }
       this.sessions.set(sessionId, worker)
+      this.sessionCwds.set(sessionId, worker.cwd)
+      worker.resetIdleTimer()
       this.warmNextSession(cwd)
       return { sessionId }
     }
@@ -216,8 +269,8 @@ export class AntigravityAcpClient implements CursorAcpLike {
       const p = params as { sessionId: string; model: string; reasoningEffort?: string; cwd?: string }
       if (this.selecting.has(p.sessionId)) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A model change is already in progress.')
       const current = this.sessions.get(p.sessionId) ?? (p.sessionId === this.activeConversationId ? this : undefined)
-      if (!current && !p.cwd) throw new AntigravityAcpError('SESSION_MISMATCH', 'Load the conversation before selecting its model.')
-      if (current?.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its model.')
+      if (!current && !p.cwd && !this.sessionCwds.has(p.sessionId)) throw new AntigravityAcpError('SESSION_MISMATCH', 'Load the conversation before selecting its model.')
+      if (current?.currentPromptPending || current?.stagingPrompt) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its model.')
       this.selecting.add(p.sessionId)
       try {
         const chosen = agySelectionArgs(await this.readModels(), p.model, p.reasoningEffort)
@@ -225,20 +278,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
         if (current?.isReady() && previous?.model === chosen.selection.model
           && previous.reasoningEffort === chosen.selection.reasoningEffort) return { selected: previous }
         // Resume the same conversation with real CLI flags. Keep the old process usable on startup failure.
-        const replacement = await this.prepareSession(p.sessionId, current?.cwd ?? p.cwd!, chosen.args)
-        if (current?.currentPromptPending) { await replacement.close(); throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A reply started during model selection.') }
+        const replacement = await this.prepareSession(p.sessionId, current?.cwd ?? p.cwd ?? this.sessionCwds.get(p.sessionId)!, chosen.args)
+        if (current?.currentPromptPending || current?.stagingPrompt) { await replacement.close(); throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A reply started during model selection.') }
         this.sessions.set(p.sessionId, replacement)
+        this.sessionCwds.set(p.sessionId, replacement.cwd)
         this.selections.set(p.sessionId, chosen.selection)
         replacement.selections.set(p.sessionId, chosen.selection)
         if (current && current !== this) await current.close()
-        else if (current === this) {
-          this.watcher?.stop()
-          this.watcher = undefined
-          const child = this.process
-          this.process = undefined
-          child?.stdout.removeAllListeners('data')
-          if (child && !child.killed) child.kill('SIGTERM')
-        }
+        else if (current === this) await this.stopProcess()
         this.emitNotification('session/update', { sessionId: p.sessionId, update: { sessionUpdate: 'model_selection', selected: chosen.selection } })
         return { selected: chosen.selection }
       } finally { this.selecting.delete(p.sessionId) }
@@ -247,13 +294,37 @@ export class AntigravityAcpClient implements CursorAcpLike {
     const sessionId = typeof (params as Record<string, unknown>)?.sessionId === 'string'
       ? (params as Record<string, unknown>).sessionId as string : undefined
     if (sessionId !== undefined && this.selecting.has(sessionId)) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'A model change is in progress.')
-    if (!this.sessionWorker && sessionId !== undefined && (sessionId !== this.activeConversationId || this.sessions.has(sessionId))) {
-      let worker = this.sessions.get(sessionId)
-      if (worker === undefined) {
-        worker = await this.prepareSession(sessionId, typeof (params as Record<string, unknown>).cwd === 'string' ? (params as Record<string, unknown>).cwd as string : this.cwd)
-        this.sessions.set(sessionId, worker)
+    if (!this.sessionWorker && sessionId !== undefined) {
+      const worker = this.sessions.get(sessionId) ?? (sessionId === this.activeConversationId && this.process ? this : undefined)
+      if ((worker?.currentPromptPending || worker?.stagingPrompt) && worker !== this) return worker.call(method, params, timeoutMs)
+      if (!worker?.currentPromptPending && !worker?.stagingPrompt) {
+        // Reserve this conversation across the stat and any replacement startup.
+        this.selecting.add(sessionId)
+        if (worker) clearTimeout(worker.idleTimer)
+        try {
+          const checkDisk = method === 'session/prompt' && worker && (worker === this || worker.syncedTranscriptMtimeMs > 0)
+          const stale = checkDisk && await worker.readTranscriptMtimeMs(sessionId) > worker.syncedTranscriptMtimeMs + 50
+          if (!worker?.isReady() || stale) {
+            const requestedCwd = (params as { cwd?: unknown }).cwd
+            const cwd = worker?.cwd ?? this.sessionCwds.get(sessionId) ?? (typeof requestedCwd === 'string' ? requestedCwd : this.cwd)
+            this.sessions.delete(sessionId)
+            if (worker === this) await this.stopProcess()
+            else await worker?.close()
+            const selected = this.selections.get(sessionId)
+            const args = selected && selected.model !== 'host-settings'
+              ? agySelectionArgs(await this.readModels(), selected.model, selected.reasoningEffort).args : undefined
+            const replacement = await this.prepareSession(sessionId, cwd, args)
+            if (selected) replacement.selections.set(sessionId, selected)
+            this.sessions.set(sessionId, replacement)
+            this.sessionCwds.set(sessionId, cwd)
+            return replacement.call(method, params, timeoutMs)
+          }
+          if (worker !== this) return worker.call(method, params, timeoutMs)
+        } finally {
+          this.selecting.delete(sessionId)
+          worker?.resetIdleTimer()
+        }
       }
-      return worker.call(method, params, timeoutMs)
     }
     if (method === 'session/load') {
       if (sessionId !== this.activeConversationId) throw new AntigravityAcpError('SESSION_MISMATCH', 'The process is bound to another conversation.')
@@ -266,14 +337,21 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
 
     if (method === 'session/prompt') {
+      if (this.stagingPrompt) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Another prompt is already in progress.')
       const p = params as { sessionId: string; prompt: Array<{ type: string; text?: string }> }
       let promptText = p.prompt.filter(item => item.type === 'text').map(item => item.text ?? '').join('\n')
       const images = p.prompt.filter(item => item.type === 'image').map(parseAcpImage)
       if (images.length > 0) {
         if (images.length > 4) throw new AntigravityAcpError('INVALID_MESSAGE', 'Too many AGY image attachments.')
         if (this.currentPromptPending) throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Another prompt is already in progress.')
-        const paths = await stageAgyImages(p.sessionId, images)
-        promptText = agyImagePrompt(promptText, paths)
+        this.stagingPrompt = true
+        clearTimeout(this.idleTimer)
+        try {
+          promptText = agyImagePrompt(promptText, await stageAgyImages(p.sessionId, images))
+        } finally {
+          this.stagingPrompt = false
+          this.resetIdleTimer()
+        }
       }
       return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS)
     }
@@ -337,20 +415,25 @@ export class AntigravityAcpClient implements CursorAcpLike {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    clearTimeout(this.idleTimer)
     const spare = this.spare
     this.spare = undefined
     void spare?.then(worker => worker.close()).catch(() => undefined)
-    await Promise.all([...this.sessions.values()].map(worker => worker.close()))
+    if (this.sessions.size) await Promise.all([...this.sessions.values()].map(worker => worker.close()))
     this.sessions.clear()
     this.ready = false
-    if (this.watcher) {
-      this.watcher.stop()
-      this.watcher = undefined
-    }
     if (this.currentPromptPending) {
       clearTimeout(this.currentPromptPending.timer)
       this.currentPromptPending.reject(new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'Antigravity ACP was closed.'))
       this.currentPromptPending = undefined
+    }
+    await this.stopProcess()
+  }
+
+  private async stopProcess(): Promise<void> {
+    if (this.watcher) {
+      this.watcher.stop()
+      this.watcher = undefined
     }
     const child = this.process
     this.process = undefined
@@ -459,7 +542,10 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
     try {
       await initPromise
+      this.syncedTranscriptMtimeMs = await this.readTranscriptMtimeMs()
+      if (this.process !== child || this.closed) throw new AntigravityAcpError('ANTIGRAVITY_EXITED', 'Antigravity stopped during initialization.')
       this.ready = true
+      this.resetIdleTimer()
       this.warmNextSession()
       this.logger?.info('Antigravity ACP ready', { conversationId: this.activeConversationId })
     } catch (err) {
@@ -469,6 +555,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   }
 
   private sendPrompt(sessionId: string, promptText: string, timeoutMs: number): Promise<unknown> {
+    if (!this.process || this.closed) throw new AntigravityAcpError('ANTIGRAVITY_UNAVAILABLE', 'Antigravity ACP is not ready.')
     if (this.currentPromptPending) {
       throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Another prompt is already in progress.')
     }
@@ -478,11 +565,13 @@ export class AntigravityAcpClient implements CursorAcpLike {
       const timer = setTimeout(() => {
         if (this.currentPromptPending) {
           this.currentPromptPending = undefined
+          this.resetIdleTimer()
           reject(new AntigravityAcpError('ANTIGRAVITY_REQUEST_TIMEOUT', 'Antigravity turn timed out.'))
         }
       }, timeoutMs)
       timer.unref?.()
 
+      clearTimeout(this.idleTimer)
       this.currentPromptPending = { sessionId, resolve, reject, timer }
 
       const payload = {
@@ -613,13 +702,26 @@ export class AntigravityAcpClient implements CursorAcpLike {
       const result = event.result as Record<string, unknown>
       if (current) {
         clearTimeout(current.timer)
-        this.currentPromptPending = undefined
         const finish = async () => {
           try {
             await this.watcher?.flush()
           } catch {
             // ignore flush errors
           }
+          let mtime: number
+          try {
+            mtime = await this.readTranscriptMtimeMs()
+          } catch (error) {
+            if (this.currentPromptPending !== current) return
+            this.currentPromptPending = undefined
+            this.resetIdleTimer()
+            current.reject(error as Error)
+            return
+          }
+          if (this.currentPromptPending !== current) return
+          this.syncedTranscriptMtimeMs = mtime
+          this.currentPromptPending = undefined
+          this.resetIdleTimer()
           if (result.status === 'ERROR') {
             current.reject(new AntigravityAcpError('ANTIGRAVITY_TURN_FAILED', String(result.error ?? 'Execution error')))
           } else {

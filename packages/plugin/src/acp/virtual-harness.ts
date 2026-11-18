@@ -9,6 +9,7 @@ import type { AcpCatalogBackend, AcpModelSelection, AcpVirtualWorkspaceView } fr
 import { acpBackendLabel, createAcpWorkspaceView, modelCatalog, nativeWorkspace, recreateWorkspaceFromId } from './virtual-catalog.js'
 import type {
   AcpClientLike,
+  AcpDiscoveredSession,
   AcpPermissionPreset,
   AcpSessionState,
   FollowState,
@@ -193,7 +194,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private sourceMetadata(session: AcpSessionState) {
     const selected = this.selectedModels.get(session.sessionId)
-    return { nativeId: session.acpSessionId, cwd: session.cwd, title: session.title ?? this.backendLabel(),
+    const label = this.backendLabel()
+    const title = session.title && session.title !== label ? session.title : session.agentRole || label
+    return { nativeId: session.acpSessionId, cwd: session.cwd, title,
+      ...(session.parentNativeId && { parentNativeId: session.parentNativeId }),
+      ...(session.agentRole && { agentRole: session.agentRole }),
       updatedAt: session.updatedAt, running: session.running, selection: selected?.model === 'host-settings' ? undefined : selected,
       ...(selected?.model === 'host-settings' ? this.modelDefaults.get(session.sessionId) : undefined) }
   }
@@ -203,9 +208,33 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (!this.sessions.has(id)) await this.sourceCatalog()
     const session = this.sessions.get(id)
     if (!session) throw new Error('The native session was not found in this backend catalog.')
-    await this.hydrateSession(session)
+    if (this.backend === 'antigravity' && !session.running && this.client.loadSessionHistory) {
+      // The source port owns an in-process ACP peer. Use its authorized history
+      // call directly so large histories retain immutable event identities.
+      const baseline = session.events
+      const count = baseline.length
+      const rows = this.client instanceof AgentAcpClient
+        ? record(await this.client.call('dsh/sessionHistory', { sessionId: id, backend: this.backend })).events
+        : await this.client.loadSessionHistory(id, this.backend)
+      if (!Array.isArray(rows)) throw new Error('The backend returned invalid session history.')
+      if (!session.running && session.events === baseline && baseline.length === count) {
+        const entries = rows as AcpSessionState['events']
+        for (let i = 0; i < entries.length; i++) {
+          const event = entries[i]!.event
+          if (event === session.events[i]?.event) continue
+          const data = record(event.data)
+          this.cacheImageAttachments(id, array(data.content ?? record(data.message).content))
+        }
+        session.events = entries
+        session.hydrated = true
+        session.staleHistory = false
+        if (entries.length) session.blank = false
+      }
+    } else await this.hydrateSession(session)
     if (session.staleHistory && session.events.length === 0) throw new Error('Authoritative native history is unavailable; the retained history has not been replaced.')
-    return { ...this.sourceMetadata(session), entries: structuredClone(session.events) }
+    const entries = this.backend === 'antigravity' && !session.running
+      ? session.events.map(entry => ({ ...entry })) : structuredClone(session.events)
+    return { ...this.sourceMetadata(session), entries }
   }
 
   async sourceCreate(cwd: string, signal: AbortSignal) {
@@ -836,13 +865,16 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     createdAt: number = Date.now(),
     updatedAt: number = Date.now(),
     blank: boolean = true,
+    lineage?: Pick<AcpDiscoveredSession, 'parentNativeId' | 'agentRole'>,
   ): AcpSessionState {
     const nativeTitle = this.titles.nativeTitle(title)
     const session: AcpSessionState = {
       sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
       acpSessionId,
       cwd,
-      ...(nativeTitle === undefined ? {} : { title: nativeTitle }),
+      title: nativeTitle,
+      parentNativeId: lineage?.parentNativeId,
+      agentRole: lineage?.agentRole,
       blank,
       running: false,
       createdAt,
@@ -857,30 +889,30 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (this.backend === 'cursor') return
     const previousTitles = new Map([...this.sessions].map(([id, session]) => [id, session.title]))
     try {
-      let discovered: Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }> = []
-      if (this.client.listSessions !== undefined) {
-        try {
-          discovered = await this.client.listSessions(workspace.path, this.backend, limit)
-          discovered = discovered.slice(0, limit)
-        } catch (error) {
-          throw error
-        }
-      }
+      const discovered = (await this.client.listSessions?.(workspace.path, this.backend, limit) ?? []).slice(0, limit)
       const attached = new Set(workspace.sessionIds)
       for (const item of discovered) {
         const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`
         if (!this.sessions.has(sessionId)) {
-          this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false)
+          this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false, item)
         }
         const existing = this.sessions.get(sessionId)
         if (existing !== undefined) {
+          const previousRole = existing.agentRole
+          existing.parentNativeId = item.parentNativeId
+          existing.agentRole = item.agentRole
           // Refresh activity from the Host without moving a live turn backwards.
           if (Number.isFinite(item.updatedAt)) {
             if (item.updatedAt > existing.updatedAt && !existing.running) existing.staleHistory = true
             existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt)
           }
           if (!previousTitles.has(sessionId) || existing.title === previousTitles.get(sessionId)) {
-            this.titles.applyNative(existing, item.title)
+            const title = this.titles.nativeTitle(item.title)
+            const fallback = !title || title === this.backendLabel()
+            if (!title && !item.agentRole && previousRole && existing.title === previousRole && !existing.titleOverridden) {
+              existing.title = undefined
+            }
+            this.titles.applyNative(existing, fallback && item.agentRole ? item.agentRole : item.title)
           }
         }
         if (!this.archivedSessionIds.has(sessionId) && !attached.has(sessionId)) {

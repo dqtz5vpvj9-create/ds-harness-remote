@@ -1,12 +1,14 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { createRequire } from 'node:module'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm, utimes, symlink, truncate } from 'node:fs/promises'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { promises as fs } from 'node:fs'
+import { appendFile, rename, mkdtemp, mkdir, writeFile, rm, utimes, symlink, truncate } from 'node:fs/promises'
 import { MAX_AGENT_ACP_TRANSFER_BYTES } from '@dsh-remote/protocol'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import {
+  clearTranscriptLoaderCache,
   discoverAntigravitySessions,
   discoverAntigravityWorkspaces,
   loadTranscriptEvents,
@@ -20,6 +22,8 @@ const prepareContract1 = async () => {
 beforeEach(prepareContract1)
 
 const cleanupContract2 = async () => {
+  vi.restoreAllMocks()
+  clearTranscriptLoaderCache()
   await rm(base, { recursive: true, force: true })
 }
 afterEach(cleanupContract2)
@@ -437,4 +441,224 @@ it('does not follow a full transcript symlink outside the native conversation', 
   await writeFile(outside, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 1, created_at: createdAt, content: 'outside' }))
   await symlink(outside, join(base, 'conversation', '.system_generated', 'logs', 'transcript_full.jsonl'))
   await expect(loadTranscriptEvents('conversation', 'remote', base)).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+})
+
+function traceFileReads() {
+  const reads: Array<{ path: string; start: number; length: number }> = []
+  const open = fs.open.bind(fs)
+  const opens = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const path = String(args[0])
+    const handle = await open(...args)
+    const read = handle.read.bind(handle)
+    vi.spyOn(handle, 'read').mockImplementation(async (...args: Parameters<typeof read>) => {
+      const [, , length, position] = args as unknown as [Buffer, number, number, number]
+      reads.push({ path, start: position, length })
+      return read(...args)
+    })
+    return handle
+  })
+  return { reads, opens }
+}
+
+it('reuses event identities and reads only validated byte ranges in both JSONL files', async () => {
+  const user = { type: 'USER_INPUT', step_index: 0, created_at: createdAt, content: '开始' }
+  const planner = { type: 'PLANNER_RESPONSE', step_index: 1, created_at: createdAt, content: '完整' }
+  const path = await writeTranscript('incremental', [user, { ...planner, truncated_fields: ['content'] }])
+  const fullPath = join(path, '..', 'transcript_full.jsonl')
+  await writeFile(fullPath, JSON.stringify(planner) + '\n')
+  const { reads, opens } = traceFileReads()
+  const load = () => loadTranscriptEvents('incremental', 'session', base)
+  const first = await load()
+  const initialSizes = new Map(reads.map(read => [read.path, read.length]))
+  reads.length = 0
+  opens.mockClear()
+  const warm = await load()
+  expect(opens).not.toHaveBeenCalled()
+  expect(warm[0]).not.toBe(first[0])
+  expect(warm.every((row, i) => row.event === first[i]!.event)).toBe(true)
+
+  const second = { ...planner, step_index: 2, content: 'later Ω' }
+  const compactLine = JSON.stringify({ ...second, content: '…', truncated_fields: ['content'] }) + '\n'
+  await appendFile(path, compactLine)
+  const partial = await load()
+  expect(reads.splice(0)).toEqual([{ path, start: initialSizes.get(path), length: Buffer.byteLength(compactLine) }])
+  expect(partial.find(row => row.event.type === 'assistant/message')!.event)
+    .toBe(first.find(row => row.event.type === 'assistant/message')!.event)
+  expect(JSON.stringify(partial)).toContain('…')
+
+  const fullLine = JSON.stringify(second) + '\n'
+  await appendFile(fullPath, fullLine.slice(0, -4))
+  await expect(load()).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  await appendFile(fullPath, fullLine.slice(-4))
+  const complete = await load()
+  expect(reads.map(read => [read.path, read.start])).toEqual(Array(2).fill([fullPath, initialSizes.get(fullPath)]))
+  expect(JSON.stringify(complete)).toContain('later Ω')
+  expect(JSON.stringify(complete)).not.toContain('…')
+  expect(complete.slice(0, 5).every((row, i) => row.event === first[i]!.event)).toBe(true)
+  const other = await loadTranscriptEvents('incremental', 'other', base)
+  expect(JSON.stringify(other)).toContain('other:1')
+})
+
+it('recovers partial UTF-8 appends, no-newline records, rotation, truncation and same-size rewrites', async () => {
+  const user = (content: string) => ({ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content })
+  const path = await writeTranscript('changes', [])
+  await writeFile(path, JSON.stringify(user('one')))
+  const load = () => loadTranscriptEvents('changes', 's', base)
+  await load()
+  const { reads } = traceFileReads()
+  const start = (await fs.stat(path)).size
+  const line = Buffer.from('\n' + JSON.stringify(user('第二')) + '\n')
+  const cut = line.indexOf(Buffer.from('二')) + 1
+  await appendFile(path, line.subarray(0, cut))
+  await expect(load()).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  await appendFile(path, line.subarray(cut))
+  expect(JSON.stringify(await load())).toContain('第二')
+  expect(reads.map(read => read.start)).toEqual([start, start + 1])
+
+  await writeFile(path, JSON.stringify(user('two')))
+  expect(JSON.stringify(await load())).toContain('two')
+  await writeFile(path, JSON.stringify(user('six')))
+  await utimes(path, 1000, 1000)
+  expect(JSON.stringify(await load())).toContain('six')
+  await appendFile(path, JSON.stringify(user('bad')))
+  await expect(load()).rejects.toMatchObject({ code: 'HISTORY_INCOMPLETE' })
+  await rename(path, path + '.old')
+  await writeFile(path, JSON.stringify(user('replacement')))
+  expect(JSON.stringify(await load())).toContain('replacement')
+  expect(reads.at(-1)?.start).toBe(0)
+})
+
+it('evicts the least recently loaded conversation after 96 entries', async () => {
+  const load = (id: string) => loadTranscriptEvents(id, 's', base)
+  for (let i = 0; i < 96; i++) {
+    await writeTranscript('chat-' + i, [])
+    await load('chat-' + i)
+  }
+  await load('chat-0')
+  await writeTranscript('chat-96', [])
+  await load('chat-96')
+  const open = vi.spyOn(fs, 'open')
+  await load('chat-0')
+  expect(open).not.toHaveBeenCalled()
+  await load('chat-1')
+  expect(open).toHaveBeenCalledTimes(1)
+})
+
+it('discovers child roles from ordered tool returns, including parents outside the page', async () => {
+  const role = 'Frontend & UX Auditor'
+  const spawn = (Role: string) => ({ name: 'invoke_subagent', args: { Prompt: 'audit', Role, TypeName: 'reviewer' } })
+  const created = (id: string) => ({ type: 'GENERIC', content: 'Created the following subagent:\n{ "conversationId":  "' + id + '" }' })
+  const path = await writeTranscript('parent-chat', [
+    { type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'other' }, spawn(role), spawn('Named child')] },
+    created('unrelated-chat'), { type: 'CHECKPOINT' }, created('child-chat'), created('named-chat'),
+    { type: 'PLANNER_RESPONSE', tool_calls: [spawn('Interrupted')] }, { type: 'USER_INPUT' }, created('unrelated-chat'),
+  ])
+  const { db, dbPath } = createDatabase()
+  try {
+    const row = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, 1, ?)')
+    for (const [id, title] of [['child-chat', 'Antigravity'], ['named-chat', 'Keep me'], ['unrelated-chat', 'Untitled Session']]) {
+      row.run(id!, title!, JSON.stringify([pathToFileURL(base).href]), createdAt)
+    }
+  } finally { db.close() }
+  const discover = () => discoverAntigravitySessions(base, 3, base, dbPath)
+  const sessions = await discover()
+  expect(sessions.find(s => s.conversationId === 'child-chat')).toMatchObject({ parentNativeId: 'parent-chat', agentRole: role, title: role })
+  expect(sessions.find(s => s.conversationId === 'named-chat')).toMatchObject({ parentNativeId: 'parent-chat', agentRole: 'Named child', title: 'Keep me' })
+  expect(sessions.find(s => s.conversationId === 'unrelated-chat')).not.toHaveProperty('parentNativeId')
+  expect(await discover()).toEqual(sessions)
+  await writeFile(path, JSON.stringify({ type: 'SYSTEM' }) + '\n')
+  expect((await discover()).every(s => !s.parentNativeId && !s.agentRole)).toBe(true)
+})
+
+it('passes stable local history and discovered lineage through the virtual Harness', async () => {
+  const { AgentAcpClient } = await import('@dsh-remote/client-core')
+  const { AcpVirtualHarness } = await import('../src/acp/virtual-harness.js')
+  const path = await writeTranscript('child', [{ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'hello' }])
+  let role = 'Frontend & UX Auditor'
+  const client = new AgentAcpClient({
+    onEvent: () => () => {},
+    async rpc<T>(_name: string, input: unknown): Promise<T> {
+      const { method } = input as { method: string }
+      if (method === 'dsh/workspaceList') return [{ path: base }] as T
+      if (method === 'dsh/sessionList') return { items: [
+        { conversationId: 'child', title: 'Antigravity', parentNativeId: 'parent', agentRole: role, createdAt: 1, updatedAt: 1 },
+      ] } as T
+      if (method === 'dsh/sessionHistory') return { events: await loadTranscriptEvents('child', 'acp:child', base) } as T
+      throw new Error('Unexpected source method')
+    },
+  })
+  const facade = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+  try {
+    expect(await facade.sourceCatalog()).toMatchObject([{ title: role, parentNativeId: 'parent', agentRole: role }])
+    const first = await facade.sourceSnapshot('child')
+    role = 'Second role'
+    expect(await facade.sourceCatalog()).toMatchObject([{ title: role, agentRole: role }])
+    const warm = await facade.sourceSnapshot('child')
+    expect(warm.entries.every((e, i) => e.event === first.entries[i]!.event)).toBe(true)
+    await appendFile(path, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt, thinking: 'thinking' }) + '\n')
+    const live = await facade.sourceSnapshot('child')
+    expect(live.entries[2]!.event).toBe(first.entries[2]!.event)
+    expect(JSON.stringify(live.entries)).toContain('thinking')
+  } finally { await facade.close() }
+})
+
+it('keeps unchanged large transcripts and a 160-session lineage index warm', async () => {
+  const planner = { type: 'PLANNER_RESPONSE', created_at: createdAt, content: 'x'.repeat(4096) }
+  await writeTranscript('big', Array.from({ length: 1000 }, (_, step_index) => ({ ...planner, step_index })))
+  const original = await loadTranscriptEvents('big', 's', base)
+  expect(original.length).toBeGreaterThanOrEqual(3000)
+  const timings: number[] = []
+  for (let i = 0; i < 9; ++i) {
+    const start = performance.now()
+    const warm = await loadTranscriptEvents('big', 's', base)
+    timings.push(performance.now() - start)
+    expect(warm[2000]!.event).toBe(original[2000]!.event)
+  }
+  const brain = join(base, 'catalog')
+  for (let i = 0; i < 160; ++i) {
+    const dir = join(brain, 'session-' + i, '.system_generated/logs')
+    await mkdir(dir, { recursive: true })
+    const spawn = [{ type: 'PLANNER_RESPONSE', tool_calls: [{ name: 'invoke_subagent', args: { Role: 'Reviewer' } }] },
+      { type: 'GENERIC', content: 'Created the following subagent:\n{"conversationId":"session-1"}' }]
+    const content = i === 0 ? spawn.map(row => JSON.stringify(row)).join('\n') : '{"type":"SYSTEM"}'
+    await writeFile(join(dir, 'transcript.jsonl'), content + '\n')
+  }
+  const discover = () => discoverAntigravitySessions('', 160, brain, join(base, 'missing.db'))
+  const start = performance.now()
+  const cold = await discover()
+  const coldMs = performance.now() - start
+  expect(cold).toHaveLength(160)
+  expect(cold.find(s => s.conversationId === 'session-1')).toMatchObject({ parentNativeId: 'session-0', title: 'Reviewer' })
+  const warmTimings: number[] = []
+  for (let i = 0; i < 9; ++i) {
+    const now = performance.now()
+    const warm = await discover()
+    warmTimings.push(performance.now() - now)
+    expect(warm).toEqual(cold)
+  }
+  const median = (samples: number[]) => samples.sort((a, b) => a - b)[4]!.toFixed(2)
+  console.info(`Transcript warm median ${median(timings)} ms, 160-session discovery cold ${coldMs.toFixed(2)} ms / warm median ${median(warmTimings)} ms`)
+})
+
+it('replays a live planner batch when returns settle and an older full record is corrected', async () => {
+  const planner = { type: 'PLANNER_RESPONSE', step_index: 1, created_at: createdAt,
+    tool_calls: [{ name: 'first', args: {} }, { name: 'second', args: {} }] }
+  const returned = { type: 'GENERIC', step_index: 2, created_at: createdAt, content: 'old result' }
+  const path = await writeTranscript('batch', [planner])
+  const full = join(path, '..', 'transcript_full.jsonl')
+  const load = () => loadTranscriptEvents('batch', 's', base)
+  const first = await load()
+  await writeFile(full, JSON.stringify(returned) + '\n')
+  await appendFile(path, JSON.stringify({ ...returned, content: 'old…', truncated_fields: ['content'] }) + '\n')
+  const live = await load()
+  expect(live.find(e => e.event.type === 'assistant/message')!.event).toBe(first.find(e => e.event.type === 'assistant/message')!.event)
+  expect(live.filter(e => e.event.type === 'tool/call').map(e => e.event.data)).toMatchObject([{ status: 'finished' }, { status: 'pending' }])
+  await appendFile(path, JSON.stringify({ type: 'PLANNER_RESPONSE', step_index: 4, created_at: createdAt, content: 'next step' }) + '\n')
+  const settled = await load()
+  expect(settled.filter(e => e.event.type === 'tool/call').map(e => e.event.data)).toMatchObject([{ status: 'finished' }, { status: 'failed' }])
+  await appendFile(full, JSON.stringify({ ...returned, content: 'corrected result' }) + '\n')
+  const revised = await load()
+  expect(revised[0]!.event).toBe(first[0]!.event)
+  expect(JSON.stringify(revised)).toContain('corrected result')
+  expect(JSON.stringify(revised)).not.toContain('old result')
 })

@@ -7337,15 +7337,15 @@ function createCipher2(cipher) {
   }
   return null;
 }
-function createAEADCipher(id6, name2, block, kx, constants7, hash22 = "sha256") {
+function createAEADCipher(id6, name2, block, kx, constants8, hash22 = "sha256") {
   const cipher = new AEADCipher();
   cipher.id = id6;
   cipher.name = name2;
   cipher.blockAlgorithm = block;
   cipher.kx = kx;
   cipher.hashAlgorithm = hash22;
-  cipher.keyLength = constants7.K_LEN;
-  cipher.nonceLength = constants7.N_MAX;
+  cipher.keyLength = constants8.K_LEN;
+  cipher.nonceLength = constants8.N_MAX;
   cipher.nonceImplicitLength = 4;
   cipher.nonceExplicitLength = 8;
   cipher.ivLength = cipher.nonceImplicitLength;
@@ -8932,13 +8932,13 @@ async function createStunOverTurnClient(config2, options = {}) {
   return turnTransport;
 }
 function alternateTlsOptions(configured, alternateDomain, tlsOptions = {}) {
-  const identity3 = alternateDomain ?? tlsOptions.servername ?? configured[0];
+  const identity4 = alternateDomain ?? tlsOptions.servername ?? configured[0];
   const checkServerIdentity2 = tlsOptions.checkServerIdentity ?? tls2.checkServerIdentity;
   return {
     ...tlsOptions,
     // SNI cannot carry an IP literal.
-    servername: isIP3(identity3) ? void 0 : identity3,
-    checkServerIdentity: (_host, cert) => checkServerIdentity2(identity3, cert)
+    servername: isIP3(identity4) ? void 0 : identity4,
+    checkServerIdentity: (_host, cert) => checkServerIdentity2(identity4, cert)
   };
 }
 function tryAlternateOf(error62, addressFamily) {
@@ -9169,10 +9169,10 @@ function generateCodecStatsId(transportId, payloadType, scopeId) {
 function getStatsTimestamp() {
   return performance.timeOrigin + performance.now();
 }
-function getReferencedStatsIds(stat11) {
+function getReferencedStatsIds(stat12) {
   const references = [];
   for (const [key, value] of Object.entries(
-    stat11
+    stat12
   )) {
     if (key === "id") {
       continue;
@@ -9195,8 +9195,8 @@ function getReferencedStatsIds(stat11) {
 }
 function buildStatsReport(stats, rootIds) {
   const index = /* @__PURE__ */ new Map();
-  for (const stat11 of stats) {
-    index.set(stat11.id, stat11);
+  for (const stat12 of stats) {
+    index.set(stat12.id, stat12);
   }
   if (!rootIds) {
     return new RTCStatsReport([...index.values()]);
@@ -9208,15 +9208,15 @@ function buildStatsReport(stats, rootIds) {
     if (!id6 || includedIds.has(id6)) {
       continue;
     }
-    const stat11 = index.get(id6);
-    if (!stat11) {
+    const stat12 = index.get(id6);
+    if (!stat12) {
       continue;
     }
     includedIds.add(id6);
-    queue.push(...getReferencedStatsIds(stat11));
+    queue.push(...getReferencedStatsIds(stat12));
   }
   return new RTCStatsReport(
-    [...includedIds].map((id6) => index.get(id6)).filter((stat11) => !!stat11)
+    [...includedIds].map((id6) => index.get(id6)).filter((stat12) => !!stat12)
   );
 }
 function getApplicationStopRevision(transceiver) {
@@ -24138,8 +24138,8 @@ var init_lib = __esm({
       constructor(stats) {
         super();
         if (stats) {
-          for (const stat11 of stats) {
-            this.set(stat11.id, stat11);
+          for (const stat12 of stats) {
+            this.set(stat12.id, stat12);
           }
         }
       }
@@ -42469,7 +42469,7 @@ var require_crc = __commonJS({
 var require_parser = __commonJS({
   "node_modules/pngjs/lib/parser.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var CrcCalculator = require_crc();
     var Parser = module.exports = function(options, dependencies) {
       this._options = options;
@@ -42480,12 +42480,12 @@ var require_parser = __commonJS({
       this._palette = [];
       this._colorType = 0;
       this._chunks = {};
-      this._chunks[constants7.TYPE_IHDR] = this._handleIHDR.bind(this);
-      this._chunks[constants7.TYPE_IEND] = this._handleIEND.bind(this);
-      this._chunks[constants7.TYPE_IDAT] = this._handleIDAT.bind(this);
-      this._chunks[constants7.TYPE_PLTE] = this._handlePLTE.bind(this);
-      this._chunks[constants7.TYPE_tRNS] = this._handleTRNS.bind(this);
-      this._chunks[constants7.TYPE_gAMA] = this._handleGAMA.bind(this);
+      this._chunks[constants8.TYPE_IHDR] = this._handleIHDR.bind(this);
+      this._chunks[constants8.TYPE_IEND] = this._handleIEND.bind(this);
+      this._chunks[constants8.TYPE_IDAT] = this._handleIDAT.bind(this);
+      this._chunks[constants8.TYPE_PLTE] = this._handlePLTE.bind(this);
+      this._chunks[constants8.TYPE_tRNS] = this._handleTRNS.bind(this);
+      this._chunks[constants8.TYPE_gAMA] = this._handleGAMA.bind(this);
       this.read = dependencies.read;
       this.error = dependencies.error;
       this.metadata = dependencies.metadata;
@@ -42500,10 +42500,10 @@ var require_parser = __commonJS({
       };
     };
     Parser.prototype.start = function() {
-      this.read(constants7.PNG_SIGNATURE.length, this._parseSignature.bind(this));
+      this.read(constants8.PNG_SIGNATURE.length, this._parseSignature.bind(this));
     };
     Parser.prototype._parseSignature = function(data2) {
-      let signature = constants7.PNG_SIGNATURE;
+      let signature = constants8.PNG_SIGNATURE;
       for (let i = 0; i < signature.length; i++) {
         if (data2[i] !== signature[i]) {
           this.error(new Error("Invalid file signature"));
@@ -42520,7 +42520,7 @@ var require_parser = __commonJS({
         name2 += String.fromCharCode(data2[i]);
       }
       let ancillary = Boolean(data2[4] & 32);
-      if (!this._hasIHDR && type !== constants7.TYPE_IHDR) {
+      if (!this._hasIHDR && type !== constants8.TYPE_IHDR) {
         this.error(new Error("Expected IHDR on beggining"));
         return;
       }
@@ -42568,7 +42568,7 @@ var require_parser = __commonJS({
         this.error(new Error("Unsupported bit depth " + depth));
         return;
       }
-      if (!(colorType in constants7.COLORTYPE_TO_BPP_MAP)) {
+      if (!(colorType in constants8.COLORTYPE_TO_BPP_MAP)) {
         this.error(new Error("Unsupported color type"));
         return;
       }
@@ -42585,16 +42585,16 @@ var require_parser = __commonJS({
         return;
       }
       this._colorType = colorType;
-      let bpp = constants7.COLORTYPE_TO_BPP_MAP[this._colorType];
+      let bpp = constants8.COLORTYPE_TO_BPP_MAP[this._colorType];
       this._hasIHDR = true;
       this.metadata({
         width,
         height,
         depth,
         interlace: Boolean(interlace),
-        palette: Boolean(colorType & constants7.COLORTYPE_PALETTE),
-        color: Boolean(colorType & constants7.COLORTYPE_COLOR),
-        alpha: Boolean(colorType & constants7.COLORTYPE_ALPHA),
+        palette: Boolean(colorType & constants8.COLORTYPE_PALETTE),
+        color: Boolean(colorType & constants8.COLORTYPE_COLOR),
+        alpha: Boolean(colorType & constants8.COLORTYPE_ALPHA),
         bpp,
         colorType
       });
@@ -42618,7 +42618,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseTRNS = function(data2) {
       this._crc.write(data2);
-      if (this._colorType === constants7.COLORTYPE_PALETTE_COLOR) {
+      if (this._colorType === constants8.COLORTYPE_PALETTE_COLOR) {
         if (this._palette.length === 0) {
           this.error(new Error("Transparency chunk must be after palette"));
           return;
@@ -42632,10 +42632,10 @@ var require_parser = __commonJS({
         }
         this.palette(this._palette);
       }
-      if (this._colorType === constants7.COLORTYPE_GRAYSCALE) {
+      if (this._colorType === constants8.COLORTYPE_GRAYSCALE) {
         this.transColor([data2.readUInt16BE(0)]);
       }
-      if (this._colorType === constants7.COLORTYPE_COLOR) {
+      if (this._colorType === constants8.COLORTYPE_COLOR) {
         this.transColor([
           data2.readUInt16BE(0),
           data2.readUInt16BE(2),
@@ -42649,7 +42649,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseGAMA = function(data2) {
       this._crc.write(data2);
-      this.gamma(data2.readUInt32BE(0) / constants7.GAMMA_DIVISION);
+      this.gamma(data2.readUInt32BE(0) / constants8.GAMMA_DIVISION);
       this._handleChunkEnd();
     };
     Parser.prototype._handleIDAT = function(length) {
@@ -42661,7 +42661,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseIDAT = function(length, data2) {
       this._crc.write(data2);
-      if (this._colorType === constants7.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
+      if (this._colorType === constants8.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
         throw new Error("Expected palette not found");
       }
       this.inflateData(data2);
@@ -43145,9 +43145,9 @@ var require_parser_async = __commonJS({
 var require_bitpacker = __commonJS({
   "node_modules/pngjs/lib/bitpacker.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     module.exports = function(dataIn, width, height, options) {
-      let outHasAlpha = [constants7.COLORTYPE_COLOR_ALPHA, constants7.COLORTYPE_ALPHA].indexOf(
+      let outHasAlpha = [constants8.COLORTYPE_COLOR_ALPHA, constants8.COLORTYPE_ALPHA].indexOf(
         options.colorType
       ) !== -1;
       if (options.colorType === options.inputColorType) {
@@ -43167,11 +43167,11 @@ var require_bitpacker = __commonJS({
       }
       let data2 = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
       let maxValue = 255;
-      let inBpp = constants7.COLORTYPE_TO_BPP_MAP[options.inputColorType];
+      let inBpp = constants8.COLORTYPE_TO_BPP_MAP[options.inputColorType];
       if (inBpp === 4 && !options.inputHasAlpha) {
         inBpp = 3;
       }
-      let outBpp = constants7.COLORTYPE_TO_BPP_MAP[options.colorType];
+      let outBpp = constants8.COLORTYPE_TO_BPP_MAP[options.colorType];
       if (options.bitDepth === 16) {
         maxValue = 65535;
         outBpp *= 2;
@@ -43195,24 +43195,24 @@ var require_bitpacker = __commonJS({
         let blue;
         let alpha = maxValue;
         switch (options.inputColorType) {
-          case constants7.COLORTYPE_COLOR_ALPHA:
+          case constants8.COLORTYPE_COLOR_ALPHA:
             alpha = data2[inIndex + 3];
             red = data2[inIndex];
             green = data2[inIndex + 1];
             blue = data2[inIndex + 2];
             break;
-          case constants7.COLORTYPE_COLOR:
+          case constants8.COLORTYPE_COLOR:
             red = data2[inIndex];
             green = data2[inIndex + 1];
             blue = data2[inIndex + 2];
             break;
-          case constants7.COLORTYPE_ALPHA:
+          case constants8.COLORTYPE_ALPHA:
             alpha = data2[inIndex + 1];
             red = data2[inIndex];
             green = red;
             blue = red;
             break;
-          case constants7.COLORTYPE_GRAYSCALE:
+          case constants8.COLORTYPE_GRAYSCALE:
             red = data2[inIndex];
             green = red;
             blue = red;
@@ -43245,8 +43245,8 @@ var require_bitpacker = __commonJS({
         for (let x = 0; x < width; x++) {
           let rgba = getRGBA(data2, inIndex);
           switch (options.colorType) {
-            case constants7.COLORTYPE_COLOR_ALPHA:
-            case constants7.COLORTYPE_COLOR:
+            case constants8.COLORTYPE_COLOR_ALPHA:
+            case constants8.COLORTYPE_COLOR:
               if (options.bitDepth === 8) {
                 outData[outIndex] = rgba.red;
                 outData[outIndex + 1] = rgba.green;
@@ -43263,8 +43263,8 @@ var require_bitpacker = __commonJS({
                 }
               }
               break;
-            case constants7.COLORTYPE_ALPHA:
-            case constants7.COLORTYPE_GRAYSCALE: {
+            case constants8.COLORTYPE_ALPHA:
+            case constants8.COLORTYPE_GRAYSCALE: {
               let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
               if (options.bitDepth === 8) {
                 outData[outIndex] = grayscale;
@@ -43437,7 +43437,7 @@ var require_filter_pack = __commonJS({
 var require_packer = __commonJS({
   "node_modules/pngjs/lib/packer.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var CrcStream = require_crc();
     var bitPacker = require_bitpacker();
     var filter = require_filter_pack();
@@ -43450,23 +43450,23 @@ var require_packer = __commonJS({
       options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
       options.deflateFactory = options.deflateFactory || zlib.createDeflate;
       options.bitDepth = options.bitDepth || 8;
-      options.colorType = typeof options.colorType === "number" ? options.colorType : constants7.COLORTYPE_COLOR_ALPHA;
-      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants7.COLORTYPE_COLOR_ALPHA;
+      options.colorType = typeof options.colorType === "number" ? options.colorType : constants8.COLORTYPE_COLOR_ALPHA;
+      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants8.COLORTYPE_COLOR_ALPHA;
       if ([
-        constants7.COLORTYPE_GRAYSCALE,
-        constants7.COLORTYPE_COLOR,
-        constants7.COLORTYPE_COLOR_ALPHA,
-        constants7.COLORTYPE_ALPHA
+        constants8.COLORTYPE_GRAYSCALE,
+        constants8.COLORTYPE_COLOR,
+        constants8.COLORTYPE_COLOR_ALPHA,
+        constants8.COLORTYPE_ALPHA
       ].indexOf(options.colorType) === -1) {
         throw new Error(
           "option color type:" + options.colorType + " is not supported at present"
         );
       }
       if ([
-        constants7.COLORTYPE_GRAYSCALE,
-        constants7.COLORTYPE_COLOR,
-        constants7.COLORTYPE_COLOR_ALPHA,
-        constants7.COLORTYPE_ALPHA
+        constants8.COLORTYPE_GRAYSCALE,
+        constants8.COLORTYPE_COLOR,
+        constants8.COLORTYPE_COLOR_ALPHA,
+        constants8.COLORTYPE_ALPHA
       ].indexOf(options.inputColorType) === -1) {
         throw new Error(
           "option input color type:" + options.inputColorType + " is not supported at present"
@@ -43490,7 +43490,7 @@ var require_packer = __commonJS({
     };
     Packer.prototype.filterData = function(data2, width, height) {
       let packedData = bitPacker(data2, width, height, this._options);
-      let bpp = constants7.COLORTYPE_TO_BPP_MAP[this._options.colorType];
+      let bpp = constants8.COLORTYPE_TO_BPP_MAP[this._options.colorType];
       let filteredData = filter(packedData, width, height, this._options, bpp);
       return filteredData;
     };
@@ -43510,8 +43510,8 @@ var require_packer = __commonJS({
     };
     Packer.prototype.packGAMA = function(gamma) {
       let buf = Buffer.alloc(4);
-      buf.writeUInt32BE(Math.floor(gamma * constants7.GAMMA_DIVISION), 0);
-      return this._packChunk(constants7.TYPE_gAMA, buf);
+      buf.writeUInt32BE(Math.floor(gamma * constants8.GAMMA_DIVISION), 0);
+      return this._packChunk(constants8.TYPE_gAMA, buf);
     };
     Packer.prototype.packIHDR = function(width, height) {
       let buf = Buffer.alloc(13);
@@ -43522,13 +43522,13 @@ var require_packer = __commonJS({
       buf[10] = 0;
       buf[11] = 0;
       buf[12] = 0;
-      return this._packChunk(constants7.TYPE_IHDR, buf);
+      return this._packChunk(constants8.TYPE_IHDR, buf);
     };
     Packer.prototype.packIDAT = function(data2) {
-      return this._packChunk(constants7.TYPE_IDAT, data2);
+      return this._packChunk(constants8.TYPE_IDAT, data2);
     };
     Packer.prototype.packIEND = function() {
-      return this._packChunk(constants7.TYPE_IEND, null);
+      return this._packChunk(constants8.TYPE_IEND, null);
     };
   }
 });
@@ -43539,7 +43539,7 @@ var require_packer_async = __commonJS({
     "use strict";
     var util = __require("util");
     var Stream = __require("stream");
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var Packer = require_packer();
     var PackerAsync = module.exports = function(opt) {
       Stream.call(this);
@@ -43550,7 +43550,7 @@ var require_packer_async = __commonJS({
     };
     util.inherits(PackerAsync, Stream);
     PackerAsync.prototype.pack = function(data2, width, height, gamma) {
-      this.emit("data", Buffer.from(constants7.PNG_SIGNATURE));
+      this.emit("data", Buffer.from(constants8.PNG_SIGNATURE));
       this.emit("data", this._packer.packIHDR(width, height));
       if (gamma) {
         this.emit("data", this._packer.packGAMA(gamma));
@@ -43874,7 +43874,7 @@ var require_packer_sync = __commonJS({
     if (!zlib.deflateSync) {
       hasSyncZlib = false;
     }
-    var constants7 = require_constants2();
+    var constants8 = require_constants2();
     var Packer = require_packer();
     module.exports = function(metaData, opt) {
       if (!hasSyncZlib) {
@@ -43885,7 +43885,7 @@ var require_packer_sync = __commonJS({
       let options = opt || {};
       let packer = new Packer(options);
       let chunks = [];
-      chunks.push(Buffer.from(constants7.PNG_SIGNATURE));
+      chunks.push(Buffer.from(constants8.PNG_SIGNATURE));
       chunks.push(packer.packIHDR(metaData.width, metaData.height));
       if (metaData.gamma) {
         chunks.push(packer.packGAMA(metaData.gamma));
@@ -71021,10 +71021,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   sourceMetadata(session2) {
     const selected = this.selectedModels.get(session2.sessionId);
+    const label = this.backendLabel();
+    const title = session2.title && session2.title !== label ? session2.title : session2.agentRole || label;
     return {
       nativeId: session2.acpSessionId,
       cwd: session2.cwd,
-      title: session2.title ?? this.backendLabel(),
+      title,
+      ...session2.parentNativeId && { parentNativeId: session2.parentNativeId },
+      ...session2.agentRole && { agentRole: session2.agentRole },
       updatedAt: session2.updatedAt,
       running: session2.running,
       selection: selected?.model === "host-settings" ? void 0 : selected,
@@ -71036,9 +71040,28 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (!this.sessions.has(id6)) await this.sourceCatalog();
     const session2 = this.sessions.get(id6);
     if (!session2) throw new Error("The native session was not found in this backend catalog.");
-    await this.hydrateSession(session2);
+    if (this.backend === "antigravity" && !session2.running && this.client.loadSessionHistory) {
+      const baseline = session2.events;
+      const count = baseline.length;
+      const rows = this.client instanceof AgentAcpClient ? record2(await this.client.call("dsh/sessionHistory", { sessionId: id6, backend: this.backend })).events : await this.client.loadSessionHistory(id6, this.backend);
+      if (!Array.isArray(rows)) throw new Error("The backend returned invalid session history.");
+      if (!session2.running && session2.events === baseline && baseline.length === count) {
+        const entries2 = rows;
+        for (let i = 0; i < entries2.length; i++) {
+          const event = entries2[i].event;
+          if (event === session2.events[i]?.event) continue;
+          const data2 = record2(event.data);
+          this.cacheImageAttachments(id6, array2(data2.content ?? record2(data2.message).content));
+        }
+        session2.events = entries2;
+        session2.hydrated = true;
+        session2.staleHistory = false;
+        if (entries2.length) session2.blank = false;
+      }
+    } else await this.hydrateSession(session2);
     if (session2.staleHistory && session2.events.length === 0) throw new Error("Authoritative native history is unavailable; the retained history has not been replaced.");
-    return { ...this.sourceMetadata(session2), entries: structuredClone(session2.events) };
+    const entries = this.backend === "antigravity" && !session2.running ? session2.events.map((entry) => ({ ...entry })) : structuredClone(session2.events);
+    return { ...this.sourceMetadata(session2), entries };
   }
   async sourceCreate(cwd2, signal) {
     const result = record2(await this.createSession({ cwd: cwd2 }, signal));
@@ -71643,13 +71666,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const path = string4(request.path) ?? workspace2.path;
     return success2(await this.client.listDirectory(path, signal));
   }
-  registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
+  registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true, lineage) {
     const nativeTitle = this.titles.nativeTitle(title);
     const session2 = {
       sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
       acpSessionId,
       cwd: cwd2,
-      ...nativeTitle === void 0 ? {} : { title: nativeTitle },
+      title: nativeTitle,
+      parentNativeId: lineage?.parentNativeId,
+      agentRole: lineage?.agentRole,
       blank,
       running: false,
       createdAt,
@@ -71663,29 +71688,29 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (this.backend === "cursor") return;
     const previousTitles = new Map([...this.sessions].map(([id6, session2]) => [id6, session2.title]));
     try {
-      let discovered = [];
-      if (this.client.listSessions !== void 0) {
-        try {
-          discovered = await this.client.listSessions(workspace2.path, this.backend, limit);
-          discovered = discovered.slice(0, limit);
-        } catch (error62) {
-          throw error62;
-        }
-      }
+      const discovered = (await this.client.listSessions?.(workspace2.path, this.backend, limit) ?? []).slice(0, limit);
       const attached = new Set(workspace2.sessionIds);
       for (const item of discovered) {
         const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`;
         if (!this.sessions.has(sessionId)) {
-          this.registerSession(item.conversationId, workspace2.path, item.title, item.createdAt, item.updatedAt, false);
+          this.registerSession(item.conversationId, workspace2.path, item.title, item.createdAt, item.updatedAt, false, item);
         }
         const existing = this.sessions.get(sessionId);
         if (existing !== void 0) {
+          const previousRole = existing.agentRole;
+          existing.parentNativeId = item.parentNativeId;
+          existing.agentRole = item.agentRole;
           if (Number.isFinite(item.updatedAt)) {
             if (item.updatedAt > existing.updatedAt && !existing.running) existing.staleHistory = true;
             existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt);
           }
           if (!previousTitles.has(sessionId) || existing.title === previousTitles.get(sessionId)) {
-            this.titles.applyNative(existing, item.title);
+            const title = this.titles.nativeTitle(item.title);
+            const fallback = !title || title === this.backendLabel();
+            if (!title && !item.agentRole && previousRole && existing.title === previousRole && !existing.titleOverridden) {
+              existing.title = void 0;
+            }
+            this.titles.applyNative(existing, fallback && item.agentRole ? item.agentRole : item.title);
           }
         }
         if (!this.archivedSessionIds.has(sessionId) && !attached.has(sessionId)) {
@@ -79257,9 +79282,9 @@ function fromBase64Url2(value) {
 
 // packages/plugin/src/client-secure-transport.ts
 var ClientSecureTransport = class {
-  constructor(inner, identity3, host) {
+  constructor(inner, identity4, host) {
     this.inner = inner;
-    this.identity = identity3;
+    this.identity = identity4;
     this.host = host;
   }
   noise;
@@ -79418,11 +79443,11 @@ var ClientConnection = class {
     this.controlToken = void 0;
     this.previousControlToken = void 0;
   }
-  accountControl(identity3, token) {
+  accountControl(identity4, token) {
     if (!this.context.config.multiHost) return void 0;
     this.control ??= new SharedControlConnection(websocketUrl(this.context.server.baseUrl));
     if (this.controlToken !== token && token !== this.previousControlToken) {
-      if (this.controlToken) this.control.refreshAccessToken(identity3.deviceId, this.controlToken, token);
+      if (this.controlToken) this.control.refreshAccessToken(identity4.deviceId, this.controlToken, token);
       this.previousControlToken = this.controlToken;
       this.controlToken = token;
     }
@@ -79435,7 +79460,7 @@ var ClientConnection = class {
       this.context.connectionProgressRun = progressRunId;
       this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
     }
-    const identity3 = this.context.requireIdentity();
+    const identity4 = this.context.requireIdentity();
     let client;
     let closed = false;
     let closeError;
@@ -79455,9 +79480,9 @@ var ClientConnection = class {
       const presence = await this.context.server.presenceFor(targetDeviceId, signal);
       signal?.throwIfAborted();
       if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
-      const credentials = await this.context.server.authenticate(identity3);
+      const credentials = await this.context.server.authenticate(identity4);
       signal?.throwIfAborted();
-      const control = this.accountControl(identity3, credentials.accessToken);
+      const control = this.accountControl(identity4, credentials.accessToken);
       const rtcFactory = this.context.config.forceRelay ? void 0 : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => void 0);
       if (!this.context.config.forceRelay && rtcFactory === void 0) {
         this.context.logger.warn("remote Harness WebRTC backend unavailable; using relay", {
@@ -79469,13 +79494,13 @@ var ClientConnection = class {
         websocketUrl(this.context.server.baseUrl),
         {
           role: "client",
-          deviceId: identity3.deviceId,
+          deviceId: identity4.deviceId,
           accessToken: this.controlToken ?? credentials.accessToken,
           ...control ? { controlSocketFactory: control.createHostSocket } : {},
           refreshAccessToken: async () => {
-            const next = await this.context.server.authenticate(identity3);
+            const next = await this.context.server.authenticate(identity4);
             signal?.throwIfAborted();
-            this.accountControl(identity3, next.accessToken);
+            this.accountControl(identity4, next.accessToken);
             return this.controlToken ?? next.accessToken;
           },
           targetDeviceId,
@@ -79508,7 +79533,7 @@ var ClientConnection = class {
         const stopProgressTimer = options.background ? () => void 0 : this.beginAttemptProgress(progressRunId, attempt);
         try {
           transport = createTransport(attempt);
-          client = new RemoteClientCore(new ClientSecureTransport(transport, identity3, target3), 6e4);
+          client = new RemoteClientCore(new ClientSecureTransport(transport, identity4, target3), 6e4);
           closed = false;
           closeError = void 0;
           client.onClose((error62) => {
@@ -86555,19 +86580,19 @@ var HostServerApi = class {
   credentialsPromise;
   harnessVersion;
   lifetime = new AbortController();
-  bindIdentity(identity3) {
-    this.identity = identity3;
+  bindIdentity(identity4) {
+    this.identity = identity4;
   }
   /** Adopt only the independent Client credential issued by a local owner.
    * The private key stays in IdentityStore; Host credentials never enter here. */
-  async adoptOwnedClient(identity3, enrollment) {
+  async adoptOwnedClient(identity4, enrollment) {
     this.lifetime.signal.throwIfAborted();
-    if (this.role !== "client" || enrollment.serverUrl !== this.baseUrl || enrollment.deviceId !== identity3.deviceId || enrollment.identityKey !== identity3.publicKey || !enrollment.account) {
+    if (this.role !== "client" || enrollment.serverUrl !== this.baseUrl || enrollment.deviceId !== identity4.deviceId || enrollment.identityKey !== identity4.publicKey || !enrollment.account) {
       throw new ServerApiError("PEER_IDENTITY_MISMATCH", "Client enrollment does not match this identity and Server.", false);
     }
     const tokens = validateTokens(enrollment.tokens);
-    this.bindIdentity(identity3);
-    const credentials = await this.saveTokens(identity3, tokens, { authorizationMethod: "owned_device", account: enrollment.account });
+    this.bindIdentity(identity4);
+    const credentials = await this.saveTokens(identity4, tokens, { authorizationMethod: "owned_device", account: enrollment.account });
     this.lifetime.signal.throwIfAborted();
     this.credentials = credentials;
   }
@@ -86585,8 +86610,8 @@ var HostServerApi = class {
     this.hostOnly = this.role === "host" && (await this.store.pairingHostOnly() || (await this.store.load(this.baseUrl, this.requireIdentity().deviceId))?.pairingRestricted === true);
   }
   async adoptPairing(result) {
-    const identity3 = this.requireIdentity();
-    if (this.role !== "host" || result.device.role !== "host" || result.device.deviceId !== identity3.deviceId || result.device.identityKey !== identity3.publicKey)
+    const identity4 = this.requireIdentity();
+    if (this.role !== "host" || result.device.role !== "host" || result.device.deviceId !== identity4.deviceId || result.device.identityKey !== identity4.publicKey)
       throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Pairing identity mismatch.", false);
     if (result.pairingRestricted) {
       if (!result.inboundOnly) throw new ServerApiError("DEVICE_SCOPE_REQUIRED", "Paired Host must remain inbound only.", false);
@@ -86594,13 +86619,13 @@ var HostServerApi = class {
       await this.store.restrictPairingHostOnly();
     }
     this.credentials = await this.withRefreshLock(async () => {
-      const existing = await this.store.load(this.baseUrl, identity3.deviceId);
+      const existing = await this.store.load(this.baseUrl, identity4.deviceId);
       if (existing?.account !== void 0 && existing.account !== result.account)
         throw new ServerApiError("PAIRING_ACCOUNT_CONFLICT", "Pairing cannot replace the current account.", false);
       if (existing !== void 0 && existing.refreshTokenExpiresAt > Date.now() + 3e4) return existing;
       return this.store.save({
         serverUrl: this.baseUrl,
-        deviceId: identity3.deviceId,
+        deviceId: identity4.deviceId,
         authorizationMethod: "device_pairing",
         account: result.account,
         accountKind: result.accountKind,
@@ -86619,8 +86644,8 @@ var HostServerApi = class {
   }
   /** Check the persisted device credential without issuing or refreshing one. */
   async hasStoredAuthorization() {
-    const identity3 = this.requireIdentity();
-    return await this.store.load(this.baseUrl, identity3.deviceId) !== void 0;
+    const identity4 = this.requireIdentity();
+    return await this.store.load(this.baseUrl, identity4.deviceId) !== void 0;
   }
   async clearAuthorization() {
     this.credentials = void 0;
@@ -86628,8 +86653,8 @@ var HostServerApi = class {
     await this.store.clear();
   }
   async revokeCurrentDevice() {
-    const identity3 = this.requireIdentity();
-    if (await this.store.load(this.baseUrl, identity3.deviceId) === void 0) {
+    const identity4 = this.requireIdentity();
+    if (await this.store.load(this.baseUrl, identity4.deviceId) === void 0) {
       await this.clearAuthorization();
       return;
     }
@@ -86639,8 +86664,8 @@ var HostServerApi = class {
       await this.clearAuthorization();
     }
   }
-  async authorizeWithAccount(identity3, email3, password, recoverIdentity) {
-    this.bindIdentity(identity3);
+  async authorizeWithAccount(identity4, email3, password, recoverIdentity) {
+    this.bindIdentity(identity4);
     const account = email3.trim();
     if (account.length === 0 || password.length === 0) {
       throw new ServerApiError("INVALID_MESSAGE", "Email and password are required.", false);
@@ -86655,7 +86680,7 @@ var HostServerApi = class {
       authorizationMethod: "account"
     };
     try {
-      await this.register(identity3, authorization);
+      await this.register(identity4, authorization);
     } catch (error62) {
       if (!(error62 instanceof ServerApiError) || error62.code !== "DEVICE_REVOKED" || recoverIdentity === void 0) throw error62;
       const nextIdentity = await recoverIdentity();
@@ -86726,8 +86751,8 @@ var HostServerApi = class {
     }
     return { qrId: value.qrId, scanUrl, expiresIn: value.expiresIn };
   }
-  async pollOAuthQrLogin(identity3, qrId, recoverIdentity) {
-    this.bindIdentity(identity3);
+  async pollOAuthQrLogin(identity4, qrId, recoverIdentity) {
+    this.bindIdentity(identity4);
     const value = requireRecord(await this.publicRequest(
       `/api/v1/auth/oauth/qr/${encodeURIComponent(qrId)}`,
       { method: "GET" }
@@ -86750,7 +86775,7 @@ var HostServerApi = class {
       authorizationMethod: "account"
     };
     try {
-      await this.register(identity3, authorization);
+      await this.register(identity4, authorization);
     } catch (error62) {
       if (!(error62 instanceof ServerApiError) || error62.code !== "DEVICE_REVOKED" || recoverIdentity === void 0) throw error62;
       const nextIdentity = await recoverIdentity();
@@ -86762,7 +86787,7 @@ var HostServerApi = class {
       authorization: { method: "account", account: account.account, isAdmin: account.isAdmin }
     };
   }
-  async authorizeHostWithCode(identity3, code) {
+  async authorizeHostWithCode(identity4, code) {
     if (this.role !== "host") {
       throw new ServerApiError("METHOD_NOT_ALLOWED", "Host registration codes can only authorize a Host device.", false);
     }
@@ -86770,23 +86795,23 @@ var HostServerApi = class {
     if (registrationCode.length === 0) {
       throw new ServerApiError("INVALID_MESSAGE", "A Host registration code is required.", false);
     }
-    this.bindIdentity(identity3);
+    this.bindIdentity(identity4);
     const tokens = await this.publicRequest("/api/v1/devices/register-with-code", {
       method: "POST",
-      body: JSON.stringify({ v: 1, code: registrationCode, device: this.deviceDescriptor(identity3) })
+      body: JSON.stringify({ v: 1, code: registrationCode, device: this.deviceDescriptor(identity4) })
     });
-    this.credentials = await this.saveTokens(identity3, validateTokens(tokens), {
+    this.credentials = await this.saveTokens(identity4, validateTokens(tokens), {
       authorizationMethod: "host_registration_code"
     });
     return { method: "host_registration_code" };
   }
-  async authorizeOwnedRole(identity3, authorizingAccessToken, account) {
-    this.bindIdentity(identity3);
+  async authorizeOwnedRole(identity4, authorizingAccessToken, account) {
+    this.bindIdentity(identity4);
     const tokens = await this.publicRequest("/api/v1/devices/register-owned-role", {
       method: "POST",
-      body: JSON.stringify({ v: 1, device: this.deviceDescriptor(identity3) })
+      body: JSON.stringify({ v: 1, device: this.deviceDescriptor(identity4) })
     }, authorizingAccessToken);
-    this.credentials = await this.saveTokens(identity3, validateTokens(tokens), {
+    this.credentials = await this.saveTokens(identity4, validateTokens(tokens), {
       authorizationMethod: "owned_device",
       ...account === void 0 ? {} : { account }
     });
@@ -86812,29 +86837,29 @@ var HostServerApi = class {
     });
     return validateTokens(tokens);
   }
-  async authenticate(identity3 = this.requireIdentity()) {
-    this.bindIdentity(identity3);
+  async authenticate(identity4 = this.requireIdentity()) {
+    this.bindIdentity(identity4);
     if (this.credentials !== void 0 && this.credentials.accessTokenExpiresAt > Date.now() + 3e4) {
       return this.credentials;
     }
-    this.credentialsPromise ??= this.loadOrIssue(identity3).finally(() => {
+    this.credentialsPromise ??= this.loadOrIssue(identity4).finally(() => {
       this.credentialsPromise = void 0;
     });
     this.credentials = await this.credentialsPromise;
     return this.credentials;
   }
   async refreshCredentials(rejectedAccessToken = this.credentials?.accessToken) {
-    const identity3 = this.requireIdentity();
+    const identity4 = this.requireIdentity();
     this.credentials = await this.withRefreshLock(async () => {
-      const stored = await this.store.load(this.baseUrl, identity3.deviceId);
+      const stored = await this.store.load(this.baseUrl, identity4.deviceId);
       if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) {
         if (this.role === "client") throw new ServerApiError("ACCOUNT_AUTH_REQUIRED", "Client sign-in is required.", false);
-        return this.register(identity3);
+        return this.register(identity4);
       }
       if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 3e4) {
         return stored;
       }
-      return this.rotateCredentials(identity3, stored);
+      return this.rotateCredentials(identity4, stored);
     });
     return this.credentials;
   }
@@ -86851,20 +86876,20 @@ var HostServerApi = class {
       throw error62;
     }
   }
-  async rotateCredentials(identity3, stored, allowRecoveredRotation = true) {
+  async rotateCredentials(identity4, stored, allowRecoveredRotation = true) {
     let tokens;
     try {
       tokens = await this.publicRequest("/api/v1/auth/refresh", {
         method: "POST",
-        body: JSON.stringify({ deviceId: identity3.deviceId, refreshToken: stored.refreshToken })
+        body: JSON.stringify({ deviceId: identity4.deviceId, refreshToken: stored.refreshToken })
       });
     } catch (error62) {
       if (error62 instanceof ServerApiError) {
         if (error62.code === "AUTH_INVALID" || error62.code === "TOKEN_EXPIRED") {
-          const latest = await this.store.load(this.baseUrl, identity3.deviceId);
+          const latest = await this.store.load(this.baseUrl, identity4.deviceId);
           if (latest !== void 0 && latest.refreshToken !== stored.refreshToken && latest.refreshTokenExpiresAt > Date.now()) {
             if (latest.accessTokenExpiresAt > Date.now() + 3e4) return latest;
-            if (allowRecoveredRotation) return this.rotateCredentials(identity3, latest, false);
+            if (allowRecoveredRotation) return this.rotateCredentials(identity4, latest, false);
           }
         }
         throw new ServerApiError(error62.code, error62.message, error62.retryable, error62.status, "credential_refresh", error62.reason);
@@ -86876,7 +86901,7 @@ var HostServerApi = class {
       ...validateTokens(tokens)
     });
     if (allowRecoveredRotation && saved.accessTokenExpiresAt <= Date.now() + 3e4 && saved.refreshToken !== stored.refreshToken && saved.refreshTokenExpiresAt > Date.now()) {
-      return this.rotateCredentials(identity3, saved, false);
+      return this.rotateCredentials(identity4, saved, false);
     }
     if (saved.accessTokenExpiresAt <= Date.now()) {
       throw new ServerApiError(
@@ -86936,45 +86961,45 @@ var HostServerApi = class {
     }
     return { online: result.online, ...typeof result.lastSeenAt === "number" ? { lastSeenAt: result.lastSeenAt } : {} };
   }
-  async loadOrIssue(identity3) {
+  async loadOrIssue(identity4) {
     return this.withRefreshLock(async () => {
-      const stored = await this.store.load(this.baseUrl, identity3.deviceId);
+      const stored = await this.store.load(this.baseUrl, identity4.deviceId);
       if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now() + 3e4) {
-        return this.register(identity3);
+        return this.register(identity4);
       }
       if (stored.accessTokenExpiresAt > Date.now() + 3e4) return stored;
-      return this.rotateCredentials(identity3, stored);
+      return this.rotateCredentials(identity4, stored);
     });
   }
-  async register(identity3, authorization) {
+  async register(identity4, authorization) {
     const tokens = await this.publicRequest("/api/v1/devices/register", {
       method: "POST",
       body: JSON.stringify({
         v: 1,
-        device: this.deviceDescriptor(identity3)
+        device: this.deviceDescriptor(identity4)
       })
     }, authorization?.accountToken);
-    this.credentials = await this.saveTokens(identity3, validateTokens(tokens), {
+    this.credentials = await this.saveTokens(identity4, validateTokens(tokens), {
       authorizationMethod: authorization?.authorizationMethod ?? "account",
       ...authorization?.account === void 0 ? {} : { account: authorization.account }
     });
     return this.credentials;
   }
-  deviceDescriptor(identity3) {
+  deviceDescriptor(identity4) {
     return {
-      deviceId: identity3.deviceId,
-      name: identity3.name,
+      deviceId: identity4.deviceId,
+      name: identity4.name,
       role: this.role,
       platform: platform(),
-      identityKey: identity3.publicKey,
+      identityKey: identity4.publicKey,
       clientVersion: PLUGIN_VERSION,
       ...this.role === "host" && this.harnessVersion !== void 0 ? { harnessVersion: this.harnessVersion } : {}
     };
   }
-  saveTokens(identity3, tokens, authorization) {
+  saveTokens(identity4, tokens, authorization) {
     return this.store.save({
       serverUrl: this.baseUrl,
-      deviceId: identity3.deviceId,
+      deviceId: identity4.deviceId,
       authorizationMethod: authorization.authorizationMethod,
       ...authorization.account === void 0 ? {} : { account: authorization.account },
       ...tokens
@@ -87550,10 +87575,10 @@ function isUsableExternalNode(candidate, requireFrom) {
 }
 function isExecutableFile(candidate) {
   try {
-    const stat11 = statSync(candidate);
-    if (!stat11.isFile()) return false;
+    const stat12 = statSync(candidate);
+    if (!stat12.isFile()) return false;
     if (process.platform === "win32") return true;
-    return (stat11.mode & 73) !== 0;
+    return (stat12.mode & 73) !== 0;
   } catch {
     return false;
   }
@@ -88863,20 +88888,20 @@ var ClientModeRuntime = class {
     this.assertHostAuthorizationForDeviceDiscovery();
     if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
     if (await this.server.hasStoredAuthorization()) return;
-    const identity3 = this.requireIdentity();
+    const identity4 = this.requireIdentity();
     this.ownerEnrollment ??= (async () => {
       const register2 = this.host?.registerOwnedClient?.bind(this.host);
       if (!register2) throw new ClientModeError("ACCOUNT_AUTH_REQUIRED", "An account-owned Host is required.");
       const enrollment = await register2({
-        deviceId: identity3.deviceId,
-        name: identity3.name,
+        deviceId: identity4.deviceId,
+        name: identity4.name,
         role: "client",
         platform: platform2(),
-        identityKey: identity3.publicKey,
+        identityKey: identity4.publicKey,
         clientVersion: PLUGIN_VERSION
       });
-      if (this.closed || this.requireIdentity() !== identity3) throw new ClientModeError("CANCELLED", "Client identity changed during enrollment.");
-      await this.server.adoptOwnedClient(identity3, enrollment);
+      if (this.closed || this.requireIdentity() !== identity4) throw new ClientModeError("CANCELLED", "Client identity changed during enrollment.");
+      await this.server.adoptOwnedClient(identity4, enrollment);
       this.clientAuthRequired = false;
     })();
     return this.ownerEnrollment;
@@ -89781,9 +89806,9 @@ var IdentityStore = class {
     if (!hasDevice) {
       return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
     }
-    let identity3;
+    let identity4;
     try {
-      identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+      identity4 = await this.readIdentity(devicePath, keyPath, deviceName);
     } catch (error62) {
       if (error62 instanceof IdentityInvalidError && isClientRole && await canAutoHealClientIdentity(this.directory, isFlatRootWithScopedIdentity)) {
         await removeIdentityRecords(this.directory);
@@ -89792,7 +89817,7 @@ var IdentityStore = class {
       throw error62;
     }
     await removeStaleTemporaries(this.directory);
-    return identity3;
+    return identity4;
   }
   async createAndReadIdentityLocked(devicePath, keyPath, deviceName) {
     const keys = generateKeyPair();
@@ -89800,9 +89825,9 @@ var IdentityStore = class {
     await atomicTextWrite(keyPath, `${keys.privateKey}
 `, 384);
     await atomicJsonWrite(devicePath, record11, 384);
-    const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
+    const identity4 = await this.readIdentity(devicePath, keyPath, deviceName);
     await removeStaleTemporaries(this.directory);
-    return identity3;
+    return identity4;
   }
   async readIdentity(devicePath, keyPath, deviceName) {
     await assertPrivateMode2(keyPath);
@@ -94716,9 +94741,9 @@ var AcpWorkspaceTools = class {
 
 // packages/plugin/src/acp/gateway.ts
 import { randomUUID as randomUUID15 } from "node:crypto";
-import { readdir as readdir5, realpath as realpath5, stat as stat5 } from "node:fs/promises";
-import { homedir as homedir6 } from "node:os";
-import { basename as basename7, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve6 } from "node:path";
+import { readdir as readdir5, realpath as realpath5, stat as stat6 } from "node:fs/promises";
+import { homedir as homedir7 } from "node:os";
+import { basename as basename7, isAbsolute as isAbsolute7, join as join13, relative as relative4, resolve as resolve6 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -95025,7 +95050,7 @@ function parseAgyModels(output2) {
 }
 async function readAgyModels(binary) {
   try {
-    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true });
+    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true, env: antigravitySpawnEnv(process.env) });
     return parseAgyModels(result.stdout);
   } catch {
     throw new Error("The installed AGY model catalog is unavailable. Retry after checking the Host CLI.");
@@ -95148,6 +95173,9 @@ async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
 import { spawn as spawn5 } from "node:child_process";
 import { Buffer as Buffer6 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
+import { stat as stat5 } from "node:fs/promises";
+import { homedir as homedir5 } from "node:os";
+import { join as join11 } from "node:path";
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-watcher.ts
 import { promises as fs2 } from "node:fs";
@@ -95206,16 +95234,16 @@ var TranscriptWatcher = class extends EventEmitter2 {
     await this.readNewLines();
   }
   async readNewLines() {
-    let stat11;
+    let stat12;
     try {
-      stat11 = await fs2.stat(this.transcriptPath);
+      stat12 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
-    if (stat11.size <= this.offset) return;
+    if (stat12.size <= this.offset) return;
     const handle = await fs2.open(this.transcriptPath, "r");
     try {
-      const bytesToRead = stat11.size - this.offset;
+      const bytesToRead = stat12.size - this.offset;
       const buffer3 = Buffer.alloc(bytesToRead);
       const { bytesRead } = await handle.read(buffer3, 0, bytesToRead, this.offset);
       this.offset += bytesRead;
@@ -95296,6 +95324,7 @@ var TranscriptWatcher = class extends EventEmitter2 {
 // packages/plugin/src/acp/adapters/antigravity-process.ts
 var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS2 = 2e4;
+var SESSION_WORKER_IDLE_MS = 9e4;
 var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
 var AntigravityAcpError = class extends Error {
   constructor(code, message, options) {
@@ -95304,6 +95333,14 @@ var AntigravityAcpError = class extends Error {
     this.name = "AntigravityAcpError";
   }
 };
+function antigravitySpawnEnv(baseEnv = process.env, homeDir = homedir5()) {
+  if (process.platform === "linux" && !baseEnv.SSH_CONNECTION && !baseEnv.SSH_CLIENT && !baseEnv.SSH_TTY) {
+    if (!baseEnv.DISPLAY && !baseEnv.WAYLAND_DISPLAY || existsSync3(join11(baseEnv.HOME || homeDir, ".gemini/antigravity-cli/antigravity-oauth-token"))) {
+      return { ...baseEnv, SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 22" };
+    }
+  }
+  return baseEnv;
+}
 function resolveAntigravityBinary(preferred) {
   if (preferred && preferred.trim() !== "" && preferred !== "agent" && preferred !== "cursor") {
     return preferred.trim();
@@ -95319,7 +95356,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     cwd: cwd2,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
-    env: process.env
+    env: antigravitySpawnEnv(process.env)
   }), options = {}) {
     this.binary = binary;
     this.logger = logger2;
@@ -95328,6 +95365,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.readModels = options.sessionWorker ? loadModels : cachedAgyModels(loadModels);
     this.args = options.args ?? ["--input-format", "stream-json", "--output-format", "stream-json"];
     this.cwd = options.cwd ?? process.cwd();
+    this.idleTimeoutMs = options.idleTimeoutMs ?? SESSION_WORKER_IDLE_MS;
     this.brainDir = options.brainDir;
     this.sessionWorker = options.sessionWorker === true;
     this.initialConversationClaimed = options.conversationId !== void 0;
@@ -95348,6 +95386,11 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   sessionWorker;
   initialConversationClaimed = false;
   sessions = /* @__PURE__ */ new Map();
+  syncedTranscriptMtimeMs = 0;
+  idleTimer;
+  idleTimeoutMs;
+  onIdleClose;
+  sessionCwds = /* @__PURE__ */ new Map();
   spare;
   spareCwd;
   args;
@@ -95357,6 +95400,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   dispatchedThinkingSteps = /* @__PURE__ */ new Set();
   selections = /* @__PURE__ */ new Map();
   selecting = /* @__PURE__ */ new Set();
+  stagingPrompt = false;
   currentPromptPending;
   start() {
     if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
@@ -95369,17 +95413,42 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   isReady() {
     return this.ready;
   }
-  prepareSession(conversationId, cwd2 = this.cwd, selectionArgs) {
+  async readTranscriptMtimeMs(conversationId = this.activeConversationId) {
+    if (!conversationId) return 0;
+    const brain = this.brainDir ?? join11(homedir5(), ".gemini/antigravity-cli/brain");
+    try {
+      return (await stat5(join11(brain, conversationId, ".system_generated/logs/transcript.jsonl"))).mtimeMs;
+    } catch (error62) {
+      if (error62.code === "ENOENT") return 0;
+      throw error62;
+    }
+  }
+  resetIdleTimer() {
+    clearTimeout(this.idleTimer);
+    if (!this.onIdleClose || this.closed || this.stagingPrompt || this.currentPromptPending) return;
+    this.idleTimer = setTimeout(() => {
+      if (!this.currentPromptPending) this.onIdleClose?.();
+    }, this.idleTimeoutMs);
+    this.idleTimer.unref?.();
+  }
+  prepareSession(conversationId, cwd2 = this.cwd, selectionArgs, onSpareIdle) {
     if (this.closed) return Promise.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed."));
     const worker = new _AntigravityAcpClient(this.binary, this.logger, this.spawnAcp, {
       args: selectionArgs ? [...withoutSelectionArgs(this.args), ...selectionArgs] : this.args,
       readModels: this.readModels,
       skipPermissions: this.skipPermissions,
       sessionWorker: true,
+      idleTimeoutMs: this.idleTimeoutMs,
       cwd: cwd2,
       brainDir: this.brainDir,
       ...conversationId === void 0 ? {} : { conversationId }
     });
+    worker.onIdleClose = () => {
+      const id6 = worker.activeConversationId;
+      if (id6 && this.sessions.get(id6) === worker) this.sessions.delete(id6);
+      onSpareIdle?.();
+      void worker.close();
+    };
     worker.onInbound((frame) => {
       for (const handler of this.inboundHandlers) handler(frame);
     });
@@ -95400,7 +95469,9 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   }
   warmNextSession(cwd2 = this.cwd) {
     if (this.sessionWorker || this.closed || this.spare !== void 0) return;
-    const spare = this.prepareSession(void 0, cwd2);
+    const spare = this.prepareSession(void 0, cwd2, void 0, () => {
+      if (this.spare === spare) this.spare = void 0;
+    });
     this.spareCwd = cwd2;
     this.spare = spare;
     void spare.catch(() => {
@@ -95456,6 +95527,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         throw new AntigravityAcpError("SESSION_MISMATCH", "Antigravity reused an existing conversation for session/new.");
       }
       this.sessions.set(sessionId2, worker);
+      this.sessionCwds.set(sessionId2, worker.cwd);
+      worker.resetIdleTimer();
       this.warmNextSession(cwd2);
       return { sessionId: sessionId2 };
     }
@@ -95473,30 +95546,24 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       const p = params;
       if (this.selecting.has(p.sessionId)) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A model change is already in progress.");
       const current = this.sessions.get(p.sessionId) ?? (p.sessionId === this.activeConversationId ? this : void 0);
-      if (!current && !p.cwd) throw new AntigravityAcpError("SESSION_MISMATCH", "Load the conversation before selecting its model.");
-      if (current?.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
+      if (!current && !p.cwd && !this.sessionCwds.has(p.sessionId)) throw new AntigravityAcpError("SESSION_MISMATCH", "Load the conversation before selecting its model.");
+      if (current?.currentPromptPending || current?.stagingPrompt) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
       this.selecting.add(p.sessionId);
       try {
         const chosen = agySelectionArgs(await this.readModels(), p.model, p.reasoningEffort);
         const previous = this.selections.get(p.sessionId);
         if (current?.isReady() && previous?.model === chosen.selection.model && previous.reasoningEffort === chosen.selection.reasoningEffort) return { selected: previous };
-        const replacement = await this.prepareSession(p.sessionId, current?.cwd ?? p.cwd, chosen.args);
-        if (current?.currentPromptPending) {
+        const replacement = await this.prepareSession(p.sessionId, current?.cwd ?? p.cwd ?? this.sessionCwds.get(p.sessionId), chosen.args);
+        if (current?.currentPromptPending || current?.stagingPrompt) {
           await replacement.close();
           throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A reply started during model selection.");
         }
         this.sessions.set(p.sessionId, replacement);
+        this.sessionCwds.set(p.sessionId, replacement.cwd);
         this.selections.set(p.sessionId, chosen.selection);
         replacement.selections.set(p.sessionId, chosen.selection);
         if (current && current !== this) await current.close();
-        else if (current === this) {
-          this.watcher?.stop();
-          this.watcher = void 0;
-          const child = this.process;
-          this.process = void 0;
-          child?.stdout.removeAllListeners("data");
-          if (child && !child.killed) child.kill("SIGTERM");
-        }
+        else if (current === this) await this.stopProcess();
         this.emitNotification("session/update", { sessionId: p.sessionId, update: { sessionUpdate: "model_selection", selected: chosen.selection } });
         return { selected: chosen.selection };
       } finally {
@@ -95505,13 +95572,35 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     const sessionId = typeof params?.sessionId === "string" ? params.sessionId : void 0;
     if (sessionId !== void 0 && this.selecting.has(sessionId)) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "A model change is in progress.");
-    if (!this.sessionWorker && sessionId !== void 0 && (sessionId !== this.activeConversationId || this.sessions.has(sessionId))) {
-      let worker = this.sessions.get(sessionId);
-      if (worker === void 0) {
-        worker = await this.prepareSession(sessionId, typeof params.cwd === "string" ? params.cwd : this.cwd);
-        this.sessions.set(sessionId, worker);
+    if (!this.sessionWorker && sessionId !== void 0) {
+      const worker = this.sessions.get(sessionId) ?? (sessionId === this.activeConversationId && this.process ? this : void 0);
+      if ((worker?.currentPromptPending || worker?.stagingPrompt) && worker !== this) return worker.call(method, params, timeoutMs);
+      if (!worker?.currentPromptPending && !worker?.stagingPrompt) {
+        this.selecting.add(sessionId);
+        if (worker) clearTimeout(worker.idleTimer);
+        try {
+          const checkDisk = method === "session/prompt" && worker && (worker === this || worker.syncedTranscriptMtimeMs > 0);
+          const stale = checkDisk && await worker.readTranscriptMtimeMs(sessionId) > worker.syncedTranscriptMtimeMs + 50;
+          if (!worker?.isReady() || stale) {
+            const requestedCwd = params.cwd;
+            const cwd2 = worker?.cwd ?? this.sessionCwds.get(sessionId) ?? (typeof requestedCwd === "string" ? requestedCwd : this.cwd);
+            this.sessions.delete(sessionId);
+            if (worker === this) await this.stopProcess();
+            else await worker?.close();
+            const selected = this.selections.get(sessionId);
+            const args = selected && selected.model !== "host-settings" ? agySelectionArgs(await this.readModels(), selected.model, selected.reasoningEffort).args : void 0;
+            const replacement = await this.prepareSession(sessionId, cwd2, args);
+            if (selected) replacement.selections.set(sessionId, selected);
+            this.sessions.set(sessionId, replacement);
+            this.sessionCwds.set(sessionId, cwd2);
+            return replacement.call(method, params, timeoutMs);
+          }
+          if (worker !== this) return worker.call(method, params, timeoutMs);
+        } finally {
+          this.selecting.delete(sessionId);
+          worker?.resetIdleTimer();
+        }
       }
-      return worker.call(method, params, timeoutMs);
     }
     if (method === "session/load") {
       if (sessionId !== this.activeConversationId) throw new AntigravityAcpError("SESSION_MISMATCH", "The process is bound to another conversation.");
@@ -95522,14 +95611,21 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       return { cancelled: true };
     }
     if (method === "session/prompt") {
+      if (this.stagingPrompt) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
       const p = params;
       let promptText = p.prompt.filter((item) => item.type === "text").map((item) => item.text ?? "").join("\n");
       const images = p.prompt.filter((item) => item.type === "image").map(parseAcpImage);
       if (images.length > 0) {
         if (images.length > 4) throw new AntigravityAcpError("INVALID_MESSAGE", "Too many AGY image attachments.");
         if (this.currentPromptPending) throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
-        const paths = await stageAgyImages(p.sessionId, images);
-        promptText = agyImagePrompt(promptText, paths);
+        this.stagingPrompt = true;
+        clearTimeout(this.idleTimer);
+        try {
+          promptText = agyImagePrompt(promptText, await stageAgyImages(p.sessionId, images));
+        } finally {
+          this.stagingPrompt = false;
+          this.resetIdleTimer();
+        }
       }
       return this.sendPrompt(p.sessionId, promptText, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS2);
     }
@@ -95582,20 +95678,24 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    clearTimeout(this.idleTimer);
     const spare = this.spare;
     this.spare = void 0;
     void spare?.then((worker) => worker.close()).catch(() => void 0);
-    await Promise.all([...this.sessions.values()].map((worker) => worker.close()));
+    if (this.sessions.size) await Promise.all([...this.sessions.values()].map((worker) => worker.close()));
     this.sessions.clear();
     this.ready = false;
-    if (this.watcher) {
-      this.watcher.stop();
-      this.watcher = void 0;
-    }
     if (this.currentPromptPending) {
       clearTimeout(this.currentPromptPending.timer);
       this.currentPromptPending.reject(new AntigravityAcpError("ANTIGRAVITY_CLOSED", "Antigravity ACP was closed."));
       this.currentPromptPending = void 0;
+    }
+    await this.stopProcess();
+  }
+  async stopProcess() {
+    if (this.watcher) {
+      this.watcher.stop();
+      this.watcher = void 0;
     }
     const child = this.process;
     this.process = void 0;
@@ -95696,7 +95796,10 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     });
     try {
       await initPromise;
+      this.syncedTranscriptMtimeMs = await this.readTranscriptMtimeMs();
+      if (this.process !== child || this.closed) throw new AntigravityAcpError("ANTIGRAVITY_EXITED", "Antigravity stopped during initialization.");
       this.ready = true;
+      this.resetIdleTimer();
       this.warmNextSession();
       this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
     } catch (err5) {
@@ -95705,6 +95808,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
   }
   sendPrompt(sessionId, promptText, timeoutMs) {
+    if (!this.process || this.closed) throw new AntigravityAcpError("ANTIGRAVITY_UNAVAILABLE", "Antigravity ACP is not ready.");
     if (this.currentPromptPending) {
       throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
     }
@@ -95714,10 +95818,12 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       const timer2 = setTimeout(() => {
         if (this.currentPromptPending) {
           this.currentPromptPending = void 0;
+          this.resetIdleTimer();
           reject(new AntigravityAcpError("ANTIGRAVITY_REQUEST_TIMEOUT", "Antigravity turn timed out."));
         }
       }, timeoutMs);
       timer2.unref?.();
+      clearTimeout(this.idleTimer);
       this.currentPromptPending = { sessionId, resolve: resolve10, reject, timer: timer2 };
       const payload = {
         event: "user",
@@ -95834,12 +95940,25 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       const result = event.result;
       if (current) {
         clearTimeout(current.timer);
-        this.currentPromptPending = void 0;
         const finish = async () => {
           try {
             await this.watcher?.flush();
           } catch {
           }
+          let mtime;
+          try {
+            mtime = await this.readTranscriptMtimeMs();
+          } catch (error62) {
+            if (this.currentPromptPending !== current) return;
+            this.currentPromptPending = void 0;
+            this.resetIdleTimer();
+            current.reject(error62);
+            return;
+          }
+          if (this.currentPromptPending !== current) return;
+          this.syncedTranscriptMtimeMs = mtime;
+          this.currentPromptPending = void 0;
+          this.resetIdleTimer();
           if (result.status === "ERROR") {
             current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
           } else {
@@ -96555,10 +96674,11 @@ function isSessionMutation(method) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
-import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve5, sep as sep2 } from "node:path";
+import { promises as fs3, constants as constants5, closeSync, openSync, readSync, realpathSync as realpathSync3, statSync as statSync3 } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
+import { isAbsolute as isAbsolute6, join as join12, relative as relative3, resolve as resolve5, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { homedir as homedir5 } from "node:os";
+import { homedir as homedir6 } from "node:os";
 import { createRequire as createRequire2 } from "node:module";
 var nodeRequire = createRequire2(import.meta.url);
 function cleanUserPrompt(raw) {
@@ -96570,36 +96690,178 @@ function cleanUserPrompt(raw) {
   }
   return raw.trim();
 }
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
-  const records = parseTranscript(await readTranscript(baseDir, conversationId, "transcript.jsonl"));
-  if (records.some((record11) => record11.truncated_fields?.length)) {
-    const full = parseTranscript(await readTranscript(baseDir, conversationId, "transcript_full.jsonl").catch((error62) => {
-      if (error62 instanceof RpcError && error62.code === "HISTORY_UNAVAILABLE") {
-        throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript is unavailable.");
+var MAX_CACHED_TRANSCRIPTS = 96;
+var transcripts = /* @__PURE__ */ new Map();
+var pendingReads = /* @__PURE__ */ new Map();
+var recordTimes = /* @__PURE__ */ new WeakMap();
+function sameFile(cursor3, stat12) {
+  return cursor3?.ino === stat12.ino && cursor3.byteOffset === stat12.size && cursor3.size === stat12.size && cursor3.mtimeMs === stat12.mtimeMs;
+}
+function checkSize(size2) {
+  if (size2 > MAX_AGENT_ACP_TRANSFER_BYTES) {
+    throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
+  }
+}
+function identity3(record11) {
+  return JSON.stringify([record11.step_index, record11.type, record11.created_at]);
+}
+async function readRange(path, stat12, start) {
+  const handle = await fs3.open(path, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0));
+  try {
+    const opened = await handle.stat();
+    checkSize(opened.size);
+    if (!opened.isFile()) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript is unavailable.");
+    if (opened.dev !== stat12.dev || opened.ino !== stat12.ino || opened.size < stat12.size) {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript changed during the read.");
+    }
+    const bytes = Buffer.allocUnsafe(stat12.size - start);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, start + offset);
+      if (!bytesRead) throw new RpcError("HISTORY_INCOMPLETE", "The native transcript changed during the read.");
+      offset += bytesRead;
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+async function readDelta(path, stat12, previous) {
+  const append = previous !== void 0 && previous.ino === stat12.ino && stat12.size > previous.byteOffset && (stat12.size > previous.size || stat12.size === previous.size && stat12.mtimeMs === previous.mtimeMs);
+  const start = append ? previous.byteOffset : 0;
+  const bytes = await readRange(path, stat12, start);
+  const records = [];
+  let needsNewline = append && previous.needsNewline;
+  let consumed = 0;
+  while (consumed < bytes.length) {
+    const newline = bytes.indexOf(10, consumed);
+    const end = newline < 0 ? bytes.length : newline;
+    const line = bytes.toString("utf8", consumed, end);
+    if (needsNewline && /[^ \t\r]/.test(line)) break;
+    if (line.trim()) {
+      let record11;
+      try {
+        record11 = JSON.parse(line);
+      } catch {
+        break;
       }
-      throw error62;
-    }));
-    const identity3 = (record11) => JSON.stringify([record11.step_index, record11.type, record11.created_at]);
-    const complete = new Map(full.map((record11) => [identity3(record11), record11]));
-    for (let index = 0; index < records.length; ++index) {
-      const record11 = records[index];
-      if (!record11.truncated_fields?.length) continue;
-      const restored = complete.get(identity3(record11));
-      if (!restored && index === records.length - 1 && records.length > 1 && complete.size > 0) {
-        continue;
+      if (!record11 || typeof record11.type !== "string") break;
+      records.push(record11);
+      needsNewline = true;
+    }
+    if (newline >= 0) needsNewline = false;
+    consumed = newline < 0 ? end : newline + 1;
+  }
+  const cursor3 = { ino: stat12.ino, size: stat12.size, mtimeMs: stat12.mtimeMs, byteOffset: start + consumed, needsNewline };
+  return { records, cursor: cursor3, append };
+}
+async function loadTranscriptEvents(conversationId, sessionId, baseDir = join12(homedir6(), ".gemini/antigravity-cli/brain")) {
+  const path = await transcriptPath(baseDir, conversationId);
+  if (!path) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript is unavailable.");
+  const previous = pendingReads.get(path);
+  const read = () => loadCachedTranscript(path, baseDir, conversationId, sessionId);
+  const pending = previous ? previous.then(read, read) : read();
+  pendingReads.set(path, pending);
+  try {
+    return await pending;
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
+    if (error62.code) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript could not be read.");
+    throw error62;
+  } finally {
+    if (pendingReads.get(path) === pending) pendingReads.delete(path);
+  }
+}
+async function loadCachedTranscript(path, baseDir, conversationId, sessionId) {
+  const stat12 = await fs3.stat(path);
+  checkSize(stat12.size);
+  let entry = transcripts.get(path);
+  if (!entry || !entry.compact || entry.compact.ino !== stat12.ino || stat12.size < entry.compact.byteOffset) {
+    entry = { rawRecords: [], truncatedIndices: [], fullByIdentity: /* @__PURE__ */ new Map(), dirty: true };
+  }
+  transcripts.delete(path);
+  transcripts.set(path, entry);
+  if (transcripts.size > MAX_CACHED_TRANSCRIPTS) transcripts.delete(transcripts.keys().next().value);
+  if (!sameFile(entry.compact, stat12)) {
+    const delta = await readDelta(path, stat12, entry.compact);
+    if (!delta.append) {
+      entry.rawRecords = [];
+      entry.truncatedIndices = [];
+    }
+    for (const record11 of delta.records) {
+      if (record11.truncated_fields?.length) entry.truncatedIndices.push(entry.rawRecords.length);
+      entry.rawRecords.push(record11);
+    }
+    entry.compact = delta.cursor;
+    entry.dirty = true;
+    requireComplete(delta.cursor);
+  }
+  if (entry.truncatedIndices.length) {
+    try {
+      const fullPath = await transcriptPath(baseDir, conversationId, "transcript_full.jsonl");
+      if (!fullPath) throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript is unavailable.");
+      const fullStat = await fs3.stat(fullPath);
+      checkSize(fullStat.size);
+      if (!sameFile(entry.full, fullStat)) {
+        const delta = await readDelta(fullPath, fullStat, entry.full);
+        if (!delta.append) entry.fullByIdentity.clear();
+        for (const record11 of delta.records) entry.fullByIdentity.set(identity3(record11), record11);
+        entry.full = delta.cursor;
+        entry.dirty = true;
+        requireComplete(delta.cursor);
       }
-      if (!restored || restored.truncated_fields?.length || record11.truncated_fields.some((field) => !(field in restored))) {
-        throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript has not completed this record.");
-      }
-      records[index] = restored;
+    } catch (error62) {
+      if (error62 instanceof RpcError && error62.code !== "HISTORY_UNAVAILABLE") throw error62;
+      throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript is unavailable.");
     }
   }
-  const events = [];
-  let currentSeq = 0;
-  let currentTurn = 0;
-  let turnOpen = false;
-  let currentStep = 1;
-  let plannerSeen = false;
+  const previous = entry.hydrated;
+  if (!entry.dirty && previous?.sessionId === sessionId && !previous.trailingUnflushedTruncated) {
+    return previous.events.map((e) => ({ ...e }));
+  }
+  const records = entry.truncatedIndices.length ? entry.rawRecords.slice() : entry.rawRecords;
+  let trailingUnflushedTruncated = false;
+  for (const index of entry.truncatedIndices) {
+    const record11 = records[index];
+    const restored = entry.fullByIdentity.get(identity3(record11));
+    if (!restored && index === records.length - 1 && index > 0 && entry.fullByIdentity.size > 0) {
+      trailingUnflushedTruncated = true;
+      continue;
+    }
+    if (!restored || restored.truncated_fields?.length || record11.truncated_fields.some((field) => !(field in restored))) {
+      throw new RpcError("HISTORY_INCOMPLETE", "The full native transcript has not completed this record.");
+    }
+    records[index] = restored;
+  }
+  entry.hydrated = await hydrateRecords(
+    conversationId,
+    sessionId,
+    records,
+    trailingUnflushedTruncated,
+    previous?.sessionId === sessionId ? previous : void 0
+  );
+  entry.dirty = false;
+  return entry.hydrated.events.map((e) => ({ ...e }));
+}
+function freezeEvent(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+  for (const child of Object.values(value)) freezeEvent(child);
+  Object.freeze(value);
+}
+async function hydrateRecords(conversationId, sessionId, records, trailingUnflushedTruncated, previous) {
+  let checkpoint = { recordIndex: 0, seq: 0, turn: 0, step: 1, turnOpen: false, plannerSeen: false };
+  if (previous && previous.checkpoint.recordIndex < records.length) {
+    const end = previous.checkpoint.recordIndex;
+    let i2 = 0;
+    while (i2 < end && previous.records[i2] === records[i2]) i2++;
+    if (i2 === end) checkpoint = previous.checkpoint;
+  }
+  const events = previous?.events.slice(0, checkpoint.seq) ?? [];
+  let currentSeq = checkpoint.seq;
+  let currentTurn = checkpoint.turn;
+  let currentStep = checkpoint.step;
+  let { turnOpen, plannerSeen } = checkpoint;
+  const replayStart = currentSeq;
   const push2 = (type, data2, time3, surface = false) => {
     events.push({
       type: "event",
@@ -96612,8 +96874,13 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       }
     });
   };
-  for (const [recordIndex, record11] of records.entries()) {
-    const time3 = record11.created_at ? new Date(record11.created_at).getTime() : Date.now();
+  for (let recordIndex = checkpoint.recordIndex; recordIndex < records.length; recordIndex++) {
+    const record11 = records[recordIndex];
+    if (record11.type === "PLANNER_RESPONSE" || record11.type === "USER_INPUT") {
+      checkpoint = { recordIndex, seq: currentSeq, turn: currentTurn, step: currentStep, turnOpen, plannerSeen };
+    }
+    const time3 = record11.created_at ? new Date(record11.created_at).getTime() : recordTimes.get(record11) ?? Date.now();
+    if (!record11.created_at) recordTimes.set(record11, time3);
     if (record11.type === "USER_INPUT") {
       if (turnOpen) {
         push2("step/end", { turn: currentTurn, step: currentStep }, time3);
@@ -96740,49 +97007,18 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
     push2("step/end", { turn: currentTurn, step: currentStep }, settledAt);
     push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
   }
-  return events;
-}
-async function readTranscript(baseDir, conversationId, name2) {
-  try {
-    const filePath = await transcriptPath(baseDir, conversationId, name2);
-    if (filePath === void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript is unavailable.");
-    if ((await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) {
-      throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
-    }
-    const handle = await fs3.open(filePath, "r");
-    try {
-      const parts = [];
-      let size2 = 0;
-      while (true) {
-        const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_AGENT_ACP_TRANSFER_BYTES + 1 - size2));
-        const { bytesRead } = await handle.read(chunk);
-        if (!bytesRead) break;
-        size2 += bytesRead;
-        if (size2 > MAX_AGENT_ACP_TRANSFER_BYTES) throw new RpcError("HISTORY_TOO_LARGE", "The native transcript exceeds the history transfer limit.");
-        parts.push(chunk.subarray(0, bytesRead));
-      }
-      return Buffer.concat(parts).toString("utf8");
-    } finally {
-      await handle.close();
-    }
-  } catch (error62) {
-    if (error62 instanceof RpcError) throw error62;
-    throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript could not be read.");
+  let i = replayStart;
+  while (previous && i < events.length && i < previous.events.length && isDeepStrictEqual(previous.events[i].event, events[i].event)) {
+    events[i] = previous.events[i];
+    i++;
   }
+  for (; i < events.length; i++) freezeEvent(events[i].event);
+  return { sessionId, trailingUnflushedTruncated, records, events, checkpoint };
 }
-function parseTranscript(content) {
-  return content.split("\n").filter((line) => line.trim()).map((line) => {
-    let record11;
-    try {
-      record11 = JSON.parse(line);
-    } catch {
-      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an incomplete or invalid record.");
-    }
-    if (!record11 || typeof record11 !== "object" || typeof record11.type !== "string") {
-      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an invalid record.");
-    }
-    return record11;
-  });
+function requireComplete(cursor3) {
+  if (cursor3.byteOffset < cursor3.size) {
+    throw new RpcError("HISTORY_INCOMPLETE", "The native transcript contains an incomplete or invalid record.");
+  }
 }
 async function querySqliteJson(dbPath, sql, params = []) {
   try {
@@ -96812,7 +97048,7 @@ async function querySqliteJson(dbPath, sql, params = []) {
     throw new RpcError("HISTORY_UNAVAILABLE", "The native conversation database could not be read.");
   }
 }
-async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
+async function discoverAntigravityWorkspaces(dbPath = join12(homedir6(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join12(homedir6(), ".gemini/antigravity-cli/brain")) {
   try {
     await fs3.stat(dbPath);
   } catch (error62) {
@@ -96857,7 +97093,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
   const path = await transcriptPath(baseDir, conversationId);
   if (path === void 0) return void 0;
   try {
-    const stat11 = await fs3.stat(path);
+    const stat12 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
     let firstLine;
     try {
@@ -96878,24 +97114,131 @@ async function readTranscriptSummary(baseDir, conversationId) {
     } finally {
       await handle.close();
     }
-    if (!firstLine.trim()) return void 0;
-    let record11;
-    try {
-      record11 = JSON.parse(firstLine);
-    } catch {
-      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript summary contains an invalid record.");
-    }
-    if (!record11 || typeof record11.type !== "string" || record11.content !== void 0 && typeof record11.content !== "string") {
-      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript summary contains an invalid record.");
-    }
-    const title = record11.type === "USER_INPUT" ? cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : "Untitled Session") : "Untitled Session";
-    return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs, updatedAt: stat11.mtimeMs };
+    return parseSummary(firstLine, conversationId, stat12.mtimeMs);
   } catch (error62) {
     if (error62 instanceof RpcError) throw error62;
     throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript summary could not be read.");
   }
 }
-async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain"), dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+function parseSummary(firstLine, conversationId, mtimeMs) {
+  if (!firstLine.trim()) return void 0;
+  let record11;
+  try {
+    record11 = JSON.parse(firstLine);
+  } catch {
+    throw new RpcError("HISTORY_INCOMPLETE", "The native transcript summary contains an invalid record.");
+  }
+  if (!record11 || typeof record11.type !== "string" || record11.content !== void 0 && typeof record11.content !== "string") {
+    throw new RpcError("HISTORY_INCOMPLETE", "The native transcript summary contains an invalid record.");
+  }
+  const title = record11.type === "USER_INPUT" ? cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : "Untitled Session") : "Untitled Session";
+  return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : mtimeMs, updatedAt: mtimeMs };
+}
+var lineageIndexes = /* @__PURE__ */ new Map();
+function subagentLinks(bytes) {
+  if (!bytes.includes("invoke_subagent")) return [];
+  const links = [];
+  let calls;
+  let index = 0;
+  for (const line of bytes.toString("utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let record11;
+    try {
+      record11 = JSON.parse(line);
+    } catch {
+      break;
+    }
+    if (record11?.type === "PLANNER_RESPONSE") {
+      calls = Array.isArray(record11.tool_calls) ? record11.tool_calls : void 0;
+      index = 0;
+    } else if (record11?.type === "USER_INPUT") {
+      calls = void 0;
+    } else if (record11?.type === "GENERIC" && calls) {
+      const call = calls[index++];
+      if (call?.name !== "invoke_subagent" || typeof record11.content !== "string") continue;
+      const childId = /"conversationId"\s*:\s*"([a-zA-Z0-9_-]{1,256})"/.exec(record11.content)?.[1];
+      if (!childId) continue;
+      const role2 = typeof call.args?.Role === "string" ? call.args.Role.trim() : "";
+      const typeName = typeof call.args?.TypeName === "string" ? call.args.TypeName.trim() : "";
+      links.push({ childId, ...role2 && { role: role2 }, ...typeName && { typeName } });
+    }
+  }
+  return links;
+}
+function readSmallTranscript(path, size2) {
+  const fd = openSync(path, constants5.O_RDONLY | (constants5.O_NOFOLLOW ?? 0));
+  try {
+    const bytes = Buffer.allocUnsafe(size2);
+    if (readSync(fd, bytes, 0, size2, 0) !== size2) {
+      throw new RpcError("HISTORY_INCOMPLETE", "The native transcript changed during the read.");
+    }
+    return bytes;
+  } finally {
+    closeSync(fd);
+  }
+}
+async function scanLineage(baseDir, needsSummary) {
+  const files = /* @__PURE__ */ new Map();
+  const children = /* @__PURE__ */ new Map();
+  let root2;
+  let ids;
+  try {
+    root2 = await fs3.realpath(baseDir);
+    ids = await fs3.readdir(root2);
+  } catch (error62) {
+    if (error62.code === "ENOENT") return { files, children };
+    throw new RpcError("HISTORY_UNAVAILABLE", "The native history directory could not be read.");
+  }
+  const previous = lineageIndexes.get(root2);
+  for (const id6 of ids) {
+    if (id6 === "tempmediaStorage" || !/^[a-zA-Z0-9_-]{1,256}$/.test(id6)) continue;
+    const path = join12(root2, id6, ".system_generated", "logs", "transcript.jsonl");
+    let file2;
+    try {
+      if (realpathSync3.native(path) !== path) continue;
+      const stat12 = statSync3(path);
+      if (!stat12.isFile()) continue;
+      file2 = previous?.get(id6);
+      if (!file2 || file2.ino !== stat12.ino || file2.size !== stat12.size || file2.mtimeMs !== stat12.mtimeMs) {
+        file2 = { ino: stat12.ino, size: stat12.size, mtimeMs: stat12.mtimeMs, links: [] };
+        if (stat12.size <= MAX_AGENT_ACP_TRANSFER_BYTES) {
+          const bytes = stat12.size <= 4096 ? readSmallTranscript(path, stat12.size) : await readRange(path, stat12, 0);
+          file2.links = subagentLinks(bytes);
+          if (needsSummary(id6)) {
+            const end = bytes.indexOf(10);
+            file2.summary = parseSummary(bytes.toString("utf8", 0, end < 0 ? bytes.length : end), id6, stat12.mtimeMs) ?? null;
+          }
+        }
+      }
+      if (needsSummary(id6) && file2.summary === void 0) file2.summary = await readTranscriptSummary(baseDir, id6) ?? null;
+    } catch (error62) {
+      if (error62.code === "ENOENT" || error62.code === "ENOTDIR") continue;
+      if (!needsSummary(id6)) continue;
+      if (error62 instanceof RpcError) throw error62;
+      throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript summary could not be read.");
+    }
+    files.set(id6, file2);
+    for (const link3 of file2.links) children.set(link3.childId, { parentNativeId: id6, role: link3.role });
+  }
+  lineageIndexes.delete(root2);
+  lineageIndexes.set(root2, files);
+  if (lineageIndexes.size > MAX_CACHED_TRANSCRIPTS) lineageIndexes.delete(lineageIndexes.keys().next().value);
+  return { files, children };
+}
+function applyLineage(sessions, children) {
+  return sessions.map((session2) => {
+    const child = children.get(session2.conversationId);
+    if (!child) return session2;
+    const defaultTitle = !session2.title || session2.title === "Antigravity" || session2.title === "Untitled Session";
+    return {
+      ...session2,
+      parentNativeId: child.parentNativeId,
+      ...child.role && { agentRole: child.role },
+      title: defaultTitle && child.role ? child.role : session2.title
+    };
+  });
+}
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join12(homedir6(), ".gemini/antigravity-cli/brain"), dbPath = join12(homedir6(), ".gemini/antigravity-cli/conversation_summaries.db")) {
   const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve5(workspacePath);
   try {
     await fs3.stat(dbPath);
@@ -96903,12 +97246,15 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
       dbPath,
       "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC;"
     );
+    const scoped = requestedWorkspace === void 0 ? rows : rows.filter((row) => workspaceMatches(row.workspace_uris, requestedWorkspace));
+    if (!scoped.length) return [];
+    const untitled = new Set(scoped.filter((row) => !row.title?.trim()).map((row) => row.conversation_id));
+    const { files: files2, children: children2 } = await scanLineage(baseDir, (id6) => untitled.has(id6));
     const summaries = [];
-    for (const row of rows) {
-      if (requestedWorkspace !== void 0 && !workspaceMatches(row.workspace_uris, requestedWorkspace)) continue;
-      const transcript = row.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, row.conversation_id);
+    for (const row of scoped) {
+      const transcript = files2.get(row.conversation_id)?.summary ?? void 0;
       if (!row.step_count && !row.title?.trim()) {
-        if (transcript !== void 0) summaries.push(transcript);
+        if (transcript !== void 0) summaries.push({ ...transcript });
         continue;
       }
       const time3 = row.last_modified_time ? new Date(row.last_modified_time).getTime() : Date.now();
@@ -96920,37 +97266,23 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
       });
     }
     const selected = summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-    await Promise.all(selected.slice(0, 32).map(async (item) => {
-      try {
-        const path = await transcriptPath(baseDir, item.conversationId);
-        if (path) {
-          const stat11 = await fs3.stat(path);
-          if (stat11.mtimeMs > item.updatedAt) item.updatedAt = stat11.mtimeMs;
-        }
-      } catch {
-      }
-    }));
-    return selected.sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const item of selected.slice(0, 32)) {
+      const file2 = files2.get(item.conversationId);
+      if (file2 && file2.mtimeMs > item.updatedAt) item.updatedAt = file2.mtimeMs;
+    }
+    return applyLineage(selected.sort((a, b) => b.updatedAt - a.updatedAt), children2);
   } catch (error62) {
     if (error62.code !== "ENOENT") throw error62;
     if (requestedWorkspace !== void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native workspace history index is unavailable.");
   }
   if (requestedWorkspace !== void 0) throw new RpcError("HISTORY_UNAVAILABLE", "The native workspace history index is unavailable.");
-  let dirEntries;
-  try {
-    dirEntries = await fs3.readdir(baseDir);
-  } catch (error62) {
-    if (error62.code === "ENOENT") return [];
-    throw new RpcError("HISTORY_UNAVAILABLE", "The native history directory could not be read.");
-  }
+  const { files, children } = await scanLineage(baseDir, (id6) => id6.includes("-"));
   const results = [];
-  for (const entry of dirEntries) {
-    if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
-    const summary3 = await readTranscriptSummary(baseDir, entry);
-    if (summary3 !== void 0) results.push(summary3);
+  for (const [id6, file2] of files) {
+    if (id6.includes("-") && file2.summary) results.push({ ...file2.summary });
   }
   results.sort((a, b) => b.updatedAt - a.updatedAt);
-  return results.slice(0, limit);
+  return applyLineage(results.slice(0, limit), children);
 }
 function workspaceMatches(rawUris, requestedWorkspace) {
   if (rawUris === void 0) return false;
@@ -96972,21 +97304,21 @@ async function transcriptPath(baseDir, conversationId, name2 = "transcript.jsonl
   if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
   try {
     const root2 = await fs3.realpath(baseDir);
-    const expected = join11(root2, conversationId, ".system_generated", "logs", name2);
+    const expected = join12(root2, conversationId, ".system_generated", "logs", name2);
     return await fs3.realpath(expected) === expected ? expected : void 0;
   } catch (error62) {
     if (error62.code === "ENOENT") return void 0;
     throw new RpcError("HISTORY_UNAVAILABLE", "The native transcript path could not be read.");
   }
 }
-async function isUninitializedAntigravityTranscript(conversationId, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
+async function isUninitializedAntigravityTranscript(conversationId, baseDir = join12(homedir6(), ".gemini/antigravity-cli/brain")) {
   if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return false;
   try {
     const root2 = await fs3.realpath(baseDir).catch((err5) => {
       if (err5.code === "ENOENT") return resolve5(baseDir);
       throw err5;
     });
-    const convDir = join11(root2, conversationId);
+    const convDir = join12(root2, conversationId);
     const convStat = await fs3.lstat(convDir).catch((err5) => {
       if (err5.code === "ENOENT") return null;
       throw err5;
@@ -96995,7 +97327,7 @@ async function isUninitializedAntigravityTranscript(conversationId, baseDir = jo
       if (convStat.isSymbolicLink() || !convStat.isDirectory()) return false;
       if (await fs3.realpath(convDir) !== convDir) return false;
     }
-    const logPath = join11(convDir, ".system_generated", "logs", "transcript.jsonl");
+    const logPath = join12(convDir, ".system_generated", "logs", "transcript.jsonl");
     const logStat = await fs3.lstat(logPath).catch((err5) => {
       if (err5.code === "ENOENT") return null;
       throw err5;
@@ -97621,7 +97953,7 @@ var AcpRemoteGateway = class {
         if (cwd3) defaultCandidates.add(cwd3);
         for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/srv/dsh-workspace", "/var/lib/dsh/local"]) {
           try {
-            const s = await stat5(candidate);
+            const s = await stat6(candidate);
             if (s.isDirectory()) defaultCandidates.add(candidate);
           } catch {
           }
@@ -97633,7 +97965,7 @@ var AcpRemoteGateway = class {
       if (cwd2) candidates.add(cwd2);
       for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
         try {
-          const s = await stat5(candidate);
+          const s = await stat6(candidate);
           if (s.isDirectory()) candidates.add(candidate);
         } catch {
         }
@@ -98587,7 +98919,7 @@ var AcpRemoteGateway = class {
     }
     try {
       const canonical = await realpath5(path);
-      const info = await stat5(canonical);
+      const info = await stat6(canonical);
       if (!info.isDirectory()) {
         throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
       }
@@ -98598,8 +98930,8 @@ var AcpRemoteGateway = class {
     }
   }
   async listDirectory(path) {
-    const home = homedir6();
-    const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
+    const home = homedir7();
+    const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join13(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve6(target3));
     const names = await readdir5(canonical);
     const entries = [];
@@ -98609,9 +98941,9 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join12(canonical, name2);
+      const child = join13(canonical, name2);
       try {
-        const info = await stat5(child);
+        const info = await stat6(child);
         if (!info.isDirectory()) continue;
         entries.push({ name: name2, path: child, hidden: name2.startsWith(".") });
       } catch {
@@ -98715,24 +99047,24 @@ function buildCrumbs(path, home) {
   return crumbs2;
 }
 function cursorBinaryCandidates(configured) {
-  const userHome = homedir6();
+  const userHome = homedir7();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join12(userHome, ".local", "bin", "agy"),
+      join13(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join12(userHome, ".local", "bin", "agent"),
+      join13(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
   if (configured === "opencode") {
     return [
       // Official installer location (curl -fsSL https://opencode.ai/install | bash).
-      join12(userHome, ".opencode", "bin", "opencode"),
-      join12(userHome, ".local", "bin", "opencode"),
+      join13(userHome, ".opencode", "bin", "opencode"),
+      join13(userHome, ".local", "bin", "opencode"),
       "opencode"
     ];
   }
@@ -98756,9 +99088,9 @@ function isRecord19(value) {
 
 // packages/plugin/src/acp/backend-installer.ts
 import { execFile as execFile3, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
-import { homedir as homedir7 } from "node:os";
-import { dirname as dirname5, join as join13, posix as posix2, win32 as win322 } from "node:path";
+import { existsSync as existsSync4, constants as constants6, accessSync as accessSync2, statSync as statSync4 } from "node:fs";
+import { homedir as homedir8 } from "node:os";
+import { dirname as dirname5, join as join14, posix as posix2, win32 as win322 } from "node:path";
 import { promisify as promisify4 } from "node:util";
 var execFileAsync2 = promisify4(execFile3);
 var BUILTIN_ACP_SPECS = Object.freeze({
@@ -98815,10 +99147,10 @@ function isBuiltinAcpBackend(id6) {
 function defaultCheckExecutable(candidate, platform4 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat11 = statSync3(candidate);
-    if (!stat11.isFile()) return false;
+    const stat12 = statSync4(candidate);
+    if (!stat12.isFile()) return false;
     if (platform4 === "win32") return true;
-    accessSync2(candidate, constants5.X_OK);
+    accessSync2(candidate, constants6.X_OK);
     return true;
   } catch {
     return false;
@@ -98851,7 +99183,7 @@ function candidateBinaryPaths(id6, options = {}) {
   const platform4 = options.platform ?? process.platform;
   const pJoin = platform4 === "win32" ? win322.join : posix2.join;
   const env = options.env ?? process.env;
-  const home = options.homedir ?? homedir7();
+  const home = options.homedir ?? homedir8();
   const localAppData = env.LOCALAPPDATA ?? (platform4 === "win32" ? pJoin(home, "AppData", "Local") : "");
   const appData = env.APPDATA ?? (platform4 === "win32" ? pJoin(home, "AppData", "Roaming") : "");
   const programFiles = env.ProgramFiles ?? (platform4 === "win32" ? "C:\\Program Files" : "");
@@ -99032,8 +99364,8 @@ function findExistingBinary(id6, options = {}) {
 function findNodeNpmCli(nodeExecPath = process.execPath) {
   const nodeDir = dirname5(nodeExecPath);
   const candidates = [
-    join13(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
-    join13(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    join14(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
+    join14(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     "D:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
     "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
   ];
@@ -99258,18 +99590,18 @@ var PluginControlRuntime = class {
       directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role),
       role: value.role
     });
-    let identity3 = await identities.loadOrCreate(hostname4());
+    let identity4 = await identities.loadOrCreate(hostname4());
     const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory), fetch, "host", next.httpServerAllowlist) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory), fetch, next.httpServerAllowlist);
     let authorization;
     if (value.role === "host" && typeof value.registrationCode === "string" && value.registrationCode.trim() !== "") {
-      authorization = await api.authorizeHostWithCode(identity3, value.registrationCode);
+      authorization = await api.authorizeHostWithCode(identity4, value.registrationCode);
     } else {
       if (typeof value.email !== "string" || typeof value.password !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "Email and password are required for account authorization.");
       }
-      authorization = await api.authorizeWithAccount(identity3, value.email, value.password, async () => {
-        identity3 = await identities.reset(hostname4());
-        return identity3;
+      authorization = await api.authorizeWithAccount(identity4, value.email, value.password, async () => {
+        identity4 = await identities.reset(hostname4());
+        return identity4;
       });
     }
     if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
@@ -99692,9 +100024,9 @@ var PluginControlRuntime = class {
         directory: serverStorageDirectory(this.identityDirectory, serverUrl, role2),
         role: role2
       });
-      const identity3 = await identities.loadExisting();
-      if (identity3 === void 0) return void 0;
-      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity3.deviceId);
+      const identity4 = await identities.loadExisting();
+      if (identity4 === void 0) return void 0;
+      const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity4.deviceId);
       if (credentials === void 0) return void 0;
       return {
         method: credentials.authorizationMethod,
@@ -99813,9 +100145,9 @@ function fail5(error62) {
 import { basename as basename9, dirname as dirname9 } from "node:path";
 
 // packages/plugin/src/host-log-store.ts
-import { mkdir as mkdir4, open as open5, readFile as readFile5, rename as rename3, rm as rm4, stat as stat6, writeFile as writeFile3 } from "node:fs/promises";
-import { homedir as homedir8 } from "node:os";
-import { dirname as dirname6, join as join14 } from "node:path";
+import { mkdir as mkdir4, open as open5, readFile as readFile5, rename as rename3, rm as rm4, stat as stat7, writeFile as writeFile3 } from "node:fs/promises";
+import { homedir as homedir9 } from "node:os";
+import { dirname as dirname6, join as join15 } from "node:path";
 var DEFAULT_MAX_ENTRIES = 1e3;
 var DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 var DEFAULT_MAX_BACKUPS = 2;
@@ -99823,10 +100155,10 @@ var MAX_LINE_CHARS = 8192;
 var TAIL_READ_BYTES = 512 * 1024;
 function resolveHostLogPath(options = {}) {
   const env = options.env ?? process.env;
-  const home = env.DSH_HOME || join14(options.homeDirectory ?? homedir8(), ".dsh");
+  const home = env.DSH_HOME || join15(options.homeDirectory ?? homedir9(), ".dsh");
   const rawProfile = options.profile ?? env.DSH_PROFILE ?? "";
   const profileSlug = rawProfile.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "host";
-  return join14(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
+  return join15(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
 }
 var HostLogStore = class {
   filePath;
@@ -99944,7 +100276,7 @@ var HostLogStore = class {
   async loadInitialFile() {
     if (this.filePath === void 0) return;
     try {
-      const info = await stat6(this.filePath);
+      const info = await stat7(this.filePath);
       this.currentBytes = info.size;
       this.sizeVerified = true;
       if (this.clearedBeforeInit || info.size === 0) return;
@@ -99980,7 +100312,7 @@ var HostLogStore = class {
       this.dirEnsured = true;
     }
     if (!this.sizeVerified) {
-      const existing = await stat6(target3).catch((err5) => isEnoent(err5) ? void 0 : Promise.reject(err5));
+      const existing = await stat7(target3).catch((err5) => isEnoent(err5) ? void 0 : Promise.reject(err5));
       this.currentBytes = existing?.size ?? 0;
       this.sizeVerified = true;
     }
@@ -100082,7 +100414,7 @@ function isEnoent(error62) {
 }
 function safeFsErrorMessage(error62) {
   if (error62 instanceof Error && error62.message.trim().length > 0) {
-    const home = homedir8();
+    const home = homedir9();
     const normalized = home.length > 0 ? error62.message.split(home).join("~") : error62.message;
     return normalized.replace(/[\r\n]+/g, " ").trim();
   }
@@ -100220,11 +100552,11 @@ var LanUploadHost = class {
     socket.on("close", () => {
       void this.dispose(entry);
     });
-    const identity3 = this.owner.identity();
+    const identity4 = this.owner.identity();
     const noise = new NoiseIkSession({
       role: "responder",
-      localPrivateKey: identity3.privateKey,
-      localPublicKey: identity3.publicKey,
+      localPrivateKey: identity4.privateKey,
+      localPublicKey: identity4.publicKey,
       remotePublicKey: this.owner.peerIdentityKey,
       prologue: createLanUploadPrologue(offer)
     });
@@ -100316,7 +100648,7 @@ function unavailable2() {
 
 // packages/plugin/src/host-pairing.ts
 import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
 var active = /* @__PURE__ */ new Set(["created", "claimed", "approved"]);
@@ -100342,13 +100674,13 @@ ${createHash7("sha256").update(raw).digest("hex")}`).digest("base64url");
 }
 var fullFingerprint = (key) => createHash7("sha256").update(rawKey(key)).digest("hex");
 var HostPairing = class {
-  constructor(serverUrl, directory, identity3, descriptor, adopt, fetcher = fetch, httpServerAllowlist = []) {
-    this.identity = identity3;
+  constructor(serverUrl, directory, identity4, descriptor, adopt, fetcher = fetch, httpServerAllowlist = []) {
+    this.identity = identity4;
     this.descriptor = descriptor;
     this.adopt = adopt;
     this.fetcher = fetcher;
     this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
-    this.path = join15(directory, "host-pairing.json");
+    this.path = join16(directory, "host-pairing.json");
   }
   path;
   serverUrl;
@@ -100544,9 +100876,9 @@ var HostPairing = class {
 
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
-import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
+import { constants as constants7 } from "node:fs";
+import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat8, unlink as unlink2 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
@@ -100629,10 +100961,10 @@ var WorkspaceUploadHost = class {
     this.assertLive();
     if (!sourceRoot || !isAbsolute8(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const root2 = await realpath6(sourceRoot);
-    const directory = await stat7(root2);
+    const directory = await stat8(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
-    const handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
+    const temp = join17(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const handle = await open6(temp, constants7.O_CREAT | constants7.O_EXCL | constants7.O_RDWR | (constants7.O_NOFOLLOW ?? 0), 384);
     const upload = {
       ...p,
       received: 0,
@@ -100688,7 +101020,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join16(upload.root, name2));
+        await link2(upload.temp, join17(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -100744,7 +101076,7 @@ var WorkspaceUploadHost = class {
       upload.authorityBytes = upload.received;
     }
     if (await realpath6(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
-    const directory = await stat7(upload.root);
+    const directory = await stat8(upload.root);
     if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure4("UPLOAD_WORKSPACE_CHANGED");
   }
   async discard(id6, upload) {
@@ -101684,9 +102016,9 @@ function createNodeWebSocket(url2) {
 // packages/plugin/src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var HostServerConnection = class {
-  constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
+  constructor(config2, identity4, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
     this.config = config2;
-    this.identity = identity3;
+    this.identity = identity4;
     this.identities = identities;
     this.api = api;
     this.connections = connections;
@@ -103157,13 +103489,13 @@ function closeCode(code) {
 
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
-import { homedir as homedir10 } from "node:os";
-import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
-import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { homedir as homedir11 } from "node:os";
+import { lstat as lstat5, realpath as realpath7, stat as stat10 } from "node:fs/promises";
+import { dirname as dirname8, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
-import { homedir as homedir9, platform as platform3 } from "node:os";
+import { mkdir as mkdir5, readdir as readdir6, stat as stat9 } from "node:fs/promises";
+import { homedir as homedir10, platform as platform3 } from "node:os";
 import { basename as basename8, dirname as dirname7, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
@@ -103174,7 +103506,7 @@ async function ensureHostWorkspaceDirectory(path) {
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve8(homedir9());
+  const home = resolve8(homedir10());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve8(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir6(target3, { withFileTypes: true });
@@ -103183,7 +103515,7 @@ async function listRemoteDirectory(path, signal) {
     signal?.throwIfAborted();
     const child = resolve8(target3, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat8(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat9(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform3() !== "win32" && row.name.startsWith(".") });
   }
@@ -103700,7 +104032,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir10() } };
+      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir11() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -103959,7 +104291,7 @@ var HarnessRemoteBridge = class {
     }
     try {
       const root2 = await realpath7(cwd2);
-      const info = await stat9(root2);
+      const info = await stat10(root2);
       if (!info.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "root-invalid");
       }
@@ -103998,7 +104330,7 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join17(currentPath, parts[i]);
+        currentPath = join18(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
@@ -104026,7 +104358,7 @@ var HarnessRemoteBridge = class {
       if (isPathOutside(canonicalRel)) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      const info = await stat9(canonical);
+      const info = await stat10(canonical);
       if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "not-regular-file");
       }
@@ -105286,15 +105618,15 @@ var HostPluginRuntime = class {
     return this.acp.status();
   }
   createAcpSourcePort(backend) {
-    const identity3 = this.currentIdentity();
+    const identity4 = this.currentIdentity();
     return createAcpSourcePort((publish) => {
       const peer = this.acp.createPeer({
-        connectionId: `source:${identity3.deviceId}:${crypto.randomUUID()}`,
-        peerDeviceId: identity3.deviceId
+        connectionId: `source:${identity4.deviceId}:${crypto.randomUUID()}`,
+        peerDeviceId: identity4.deviceId
       }, publish);
       if (!peer) throw new RpcError("ACP_UNAVAILABLE", "The native Agent backend is unavailable.");
       return peer;
-    }, { deviceId: identity3.deviceId, name: this.config.deviceName }, backend);
+    }, { deviceId: identity4.deviceId, name: this.config.deviceName }, backend);
   }
   acpCall(input4) {
     return this.requireLocalAcpPeer().call(input4);
@@ -105348,10 +105680,10 @@ var HostPluginRuntime = class {
       acp: this.acp.status()
     };
   }
-  createServerConnection(identity3) {
+  createServerConnection(identity4) {
     return new HostServerConnection(
       this.config,
-      identity3,
+      identity4,
       this.identities,
       this.serverApi,
       this.connections,
@@ -105479,10 +105811,10 @@ var HostPluginRuntime = class {
       throw new RpcError("CODEX_UNAVAILABLE", "Local CodeX is disabled or unavailable on this Host.");
     }
     if (this.localCodexPeer !== void 0) return this.localCodexPeer;
-    const identity3 = this.currentIdentity();
+    const identity4 = this.currentIdentity();
     const peer = this.codex.createPeer({
-      connectionId: `loopback:${identity3.deviceId}`,
-      peerDeviceId: identity3.deviceId
+      connectionId: `loopback:${identity4.deviceId}`,
+      peerDeviceId: identity4.deviceId
     }, (event, data2) => this.localCodexPublish(event, data2));
     if (peer === void 0) {
       throw new RpcError("CODEX_UNAVAILABLE", "Local CodeX is disabled or unavailable on this Host.");
@@ -105495,10 +105827,10 @@ var HostPluginRuntime = class {
       throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
     }
     if (this.localAcpPeer !== void 0) return this.localAcpPeer;
-    const identity3 = this.currentIdentity();
+    const identity4 = this.currentIdentity();
     const peer = this.acp.createPeer({
-      connectionId: `loopback:${identity3.deviceId}`,
-      peerDeviceId: identity3.deviceId
+      connectionId: `loopback:${identity4.deviceId}`,
+      peerDeviceId: identity4.deviceId
     }, (event, data2) => this.localAcpPublish(event, data2));
     if (peer === void 0) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
@@ -106145,9 +106477,9 @@ function decodeBase64(value) {
 }
 
 // packages/plugin/src/cli.ts
-import { stat as stat10 } from "node:fs/promises";
+import { stat as stat11 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -106205,13 +106537,13 @@ async function login(args, runtime) {
 Waiting for authorization...
 `);
   const deadline = runtime.now() + session2.expiresIn * 1e3;
-  let identity3 = context.identity;
+  let identity4 = context.identity;
   while (runtime.now() < deadline) {
     let result;
     try {
-      result = await context.api.pollOAuthQrLogin(identity3, session2.qrId, async () => {
-        identity3 = await context.identities.reset(context.deviceName);
-        return identity3;
+      result = await context.api.pollOAuthQrLogin(identity4, session2.qrId, async () => {
+        identity4 = await context.identities.reset(context.deviceName);
+        return identity4;
       });
     } catch (error62) {
       if (!(error62 instanceof ServerApiError) || !error62.retryable) throw error62;
@@ -106239,7 +106571,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join18(directory, "device.json"))) {
+  if (!await exists3(join19(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -106249,10 +106581,10 @@ Run "ds-harness-remote login" to authorize this Host.
   }
   const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
-  const identity3 = await identities.loadOrCreate(deviceName);
+  const identity4 = await identities.loadOrCreate(deviceName);
   const store = new ServerCredentialStore(directory);
-  const stored = await store.load(serverUrl, identity3.deviceId);
-  lines.push(`Device: ${identity3.name} (${identity3.deviceId})`);
+  const stored = await store.load(serverUrl, identity4.deviceId);
+  lines.push(`Device: ${identity4.name} (${identity4.deviceId})`);
   if (stored === void 0) {
     lines.push("Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
@@ -106264,9 +106596,9 @@ Run "ds-harness-remote login" to authorize this Host.
   lines.push(`Authorization: logged in (${authorizationLabel(stored.authorizationMethod)})`);
   if (stored.account !== void 0) lines.push(`Account: ${stored.account}`);
   const api = runtime.createHostApi(serverUrl, store);
-  api.bindIdentity(identity3);
+  api.bindIdentity(identity4);
   try {
-    await api.authenticate(identity3);
+    await api.authenticate(identity4);
     lines.push("Credential: ready");
     lines.push("Presence: published while the Harness process is running");
     write2(runtime.stdout, `${lines.join("\n")}
@@ -106299,9 +106631,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join18(directory, "device.json")),
-    exists3(join18(directory, "device.key")),
-    exists3(join18(directory, "server-credentials.json"))
+    exists3(join19(directory, "device.json")),
+    exists3(join19(directory, "device.key")),
+    exists3(join19(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
@@ -106311,9 +106643,9 @@ async function logout(args, runtime) {
   const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
   let revokeFailure;
   try {
-    const identity3 = await identities.loadOrCreate(deviceName);
+    const identity4 = await identities.loadOrCreate(deviceName);
     const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-    api.bindIdentity(identity3);
+    api.bindIdentity(identity4);
     await api.revokeCurrentDevice();
   } catch (error62) {
     revokeFailure = error62;
@@ -106354,9 +106686,9 @@ async function hostContext(runtime) {
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname5();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env, role: "host" });
-  const identity3 = await identities.loadOrCreate(deviceName);
+  const identity4 = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  return { api, identities, identity: identity3, deviceName };
+  return { api, identities, identity: identity4, deviceName };
 }
 function selectedServer() {
   return normalizeServerUrl(DEFAULT_REMOTE_SERVER_URL);
@@ -106430,7 +106762,7 @@ function terminalLink(url2, target3) {
 }
 async function exists3(path) {
   try {
-    await stat10(path);
+    await stat11(path);
     return true;
   } catch (error62) {
     if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return false;

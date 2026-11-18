@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { antigravitySpawnEnv } from '../antigravity-process.js'
 import { promisify } from 'node:util'
 
 export interface AgySelection { provider: 'antigravity'; model: string; reasoningEffort?: string }
@@ -43,7 +44,7 @@ export function parseAgyModels(output: string): AgyCatalog {
 
 export async function readAgyModels(binary: string): Promise<AgyCatalog> {
   try {
-    const result = await exec(binary, ['models'], { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: 'utf8', windowsHide: true })
+    const result = await exec(binary, ['models'], { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: 'utf8', windowsHide: true, env: antigravitySpawnEnv(process.env) })
     return parseAgyModels(result.stdout)
   } catch { throw new Error('The installed AGY model catalog is unavailable. Retry after checking the Host CLI.') }
 }

@@ -33,7 +33,7 @@ export interface SourceSession extends SourceIdentity {
     connection?: { state: 'online' | 'offline'; observedAt: number } | undefined;
     capabilities: SourceCapabilities; pendingRequests: SourceApproval[];
     codex?: { model: string | null; reasoningEffort: string | null; parentThreadId: string | null; agentNickname: string | null; settings?: Record<string, unknown> | undefined } | undefined;
-    agent?: { provider: string; model: string; reasoningEffort?: string | undefined } | undefined;
+    agent?: { provider: string; model: string; reasoningEffort?: string | undefined; parentNativeId?: string | undefined; agentRole?: string | undefined } | undefined;
     /** Exact pre-cutover resource, advertised only by its verified native owner. */
     legacyOrigin?: { hubId: string; sessionId: string } | undefined;
 }

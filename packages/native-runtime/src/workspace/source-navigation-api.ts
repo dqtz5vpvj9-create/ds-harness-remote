@@ -9,7 +9,7 @@ export type SourcePositionResult = z.infer<typeof sourcePositionResult>;
 const sourceText = z.string().min(1).max(8192).refine(value => !/[\x00-\x1f\x7f]/.test(value));
 export const sourceResumeRequest = z.strictObject({ sessionId: sourceText });
 export const sourceResumeContext = z.strictObject({ sessionId: sourceText, machineId: sourceText, sourceId: sourceText,
-    engine: z.literal('codex'), nativeId: sourceText, cwd: sourceText, codexHome: sourceText, platformOs: sourceText, platformFamily: sourceText });
+    engine: z.enum(['codex', 'claude', 'antigravity']), nativeId: sourceText, cwd: sourceText, codexHome: sourceText.optional(), platformOs: sourceText, platformFamily: sourceText });
 export type SourceResumeRequest = z.infer<typeof sourceResumeRequest>;
 export type SourceResumeContext = z.infer<typeof sourceResumeContext>;
 export interface SourceNavigationApi {

@@ -45,11 +45,22 @@ export function piPromptOutcome(kind: string, update: JsonRecord): PiTurnOutcome
   return { kind: 'completed' }
 }
 
+export interface AcpDiscoveredSession {
+  conversationId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  parentNativeId?: string
+  agentRole?: string
+}
+
 export interface AcpSessionState {
   sessionId: string
   acpSessionId: string
   cwd: string
   title?: string
+  parentNativeId?: string
+  agentRole?: string
   titleOverridden?: boolean
   titleFromPrompt?: boolean
   hydrated?: boolean
@@ -121,7 +132,7 @@ export interface AcpClientLike {
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
-  listSessions?(path: string, backend?: string, limit?: number, signal?: AbortSignal): Promise<Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }>>
+  listSessions?(path: string, backend?: string, limit?: number, signal?: AbortSignal): Promise<AcpDiscoveredSession[]>
   loadSessionHistory?(sessionId: string, backend?: string, signal?: AbortSignal): Promise<unknown[]>
   openStream(
     sessionId: string,
